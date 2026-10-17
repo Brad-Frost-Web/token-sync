@@ -131,8 +131,8 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
 
     if (unstamped.op === 'set') {
       // Cleared keys still count against the cap, so a cleared key coming back adds nothing.
-      const added = Object.keys(unstamped.props).filter((key) => !state.has(key)).length;
-      if (state.size() + added > MAX_ROOM_KEYS) return error(`a room may hold at most ${MAX_ROOM_KEYS} properties`);
+      const added = Object.keys(unstamped.props).filter((key) => !state.has(key, unstamped.scope)).length;
+      if (state.size() + added > MAX_ROOM_KEYS) return error(`a room may hold at most ${MAX_ROOM_KEYS} properties, counting each theme's edits to one separately`);
     }
 
     const msg = { ...unstamped, ts: clock.stamp() };

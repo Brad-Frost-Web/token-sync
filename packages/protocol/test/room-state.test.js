@@ -153,3 +153,52 @@ test('catch-up as sets brings a stale peer up to date; a broadcast answer leaves
   assert.deepEqual(room.snapshotMessages('r', { asSets: true }).map((m) => m.op), ['reset', 'set']);
   assert.deepEqual(room.snapshotMessages('r', { withReset: false }).map((m) => m.op), ['snapshot']);
 });
+
+test('scope: each theme keeps its own edits, and a page sees its theme plus the unscoped ones', () => {
+  const state = createRoomState();
+  state.apply({ op: 'set', from: 'source', props: { '--brand': 'blue', '--radius': '4px' }, ts: 10 });
+  state.apply({ op: 'set', from: 'source', scope: 'bfw', props: { '--brand': 'green' }, ts: 20 });
+  state.apply({ op: 'set', from: 'source', scope: 'southleft', props: { '--brand': 'orange' }, ts: 30 });
+  const wearing = (theme) => (scope) => scope === theme;
+  assert.deepEqual(state.props(wearing('bfw')), { '--brand': 'green', '--radius': '4px' });
+  assert.deepEqual(state.props(wearing('southleft')), { '--brand': 'orange', '--radius': '4px' });
+  assert.deepEqual(state.props(wearing('altitude')), { '--brand': 'blue', '--radius': '4px' });
+  // A later unscoped write wins on every theme; "*" is the same as absent.
+  state.apply({ op: 'set', from: 'source', scope: '*', props: { '--brand': 'black' }, ts: 40 });
+  assert.equal(state.props(wearing('bfw'))['--brand'], 'black');
+  assert.equal(state.props(wearing('southleft'))['--brand'], 'black');
+});
+
+test('scope: answers keep the theme each write was for, and a reset clears every theme', () => {
+  const state = createRoomState();
+  state.apply({ op: 'set', from: 'source', props: { '--radius': '4px' }, ts: 10 });
+  state.apply({ op: 'set', from: 'source', scope: 'bfw', props: { '--brand': 'green' }, ts: 10 });
+  const answers = state.snapshotMessages('r', { withReset: false });
+  assert.deepEqual(answers.map((m) => [m.scope, m.props]), [[undefined, { '--radius': '4px' }], ['bfw', { '--brand': 'green' }]]);
+  const joiner = createRoomState();
+  for (const m of answers) joiner.apply(m);
+  assert.deepEqual(joiner.props((s) => s === 'southleft'), { '--radius': '4px' });
+  state.apply({ op: 'reset', from: 'presenter', ts: 20 });
+  assert.deepEqual(state.props(), {});
+});
+
+test("scope: a theme's stale answer never repaints a key the page already shows", () => {
+  const state = createRoomState();
+  const onBfw = (scope) => scope === 'bfw';
+  // A lab source's unscoped write, then a bfw customizer's answer stamped later.
+  state.apply({ op: 'set', from: 'source', props: { '--brand': 'blue' }, ts: 10 });
+  state.apply({ op: 'snapshot', from: 'source', scope: 'bfw', props: { '--brand': 'green' }, ts: 99 });
+  assert.equal(state.props(onBfw)['--brand'], 'blue');
+  // And the other way round: an unscoped answer yields to a scoped write.
+  const other = createRoomState();
+  other.apply({ op: 'set', from: 'source', scope: 'bfw', props: { '--brand': 'blue' }, ts: 10 });
+  other.apply({ op: 'snapshot', from: 'source', props: { '--brand': 'green' }, ts: 99 });
+  assert.equal(other.props(onBfw)['--brand'], 'blue');
+});
+
+test('scope: theme ids match without case', () => {
+  const state = createRoomState();
+  state.apply({ op: 'set', from: 'source', scope: 'BFW', props: { '--brand': 'green' }, ts: 10 });
+  assert.equal(state.props((scope) => scope === 'bfw')['--brand'], 'green');
+  assert.equal(state.has('--brand', 'Bfw'), true);
+});

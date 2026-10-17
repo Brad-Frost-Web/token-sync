@@ -13,10 +13,24 @@
 import { createMessage } from './message.js';
 
 /**
- * @typedef {{ value: string | null, ts: number }} Entry  null: cleared at ts
+ * @typedef {{ key: string, scope: string, value: string | null, ts: number }} Entry  null: cleared at ts
  * @typedef {{ applied: boolean, reason?: string, changed: string[] }} ApplyResult
  */
 
+/** Absent and `*` both mean every theme. */
+const ALL = '*';
+// Theme ids are matched without case, as <html> classes are written: lowercase.
+const scopeOf = (scope) => (typeof scope === 'string' && scope ? scope.toLowerCase() : ALL);
+const idOf = (scope, key) => `${scope}\n${key}`;
+
+/**
+ * Scope (FEATURE-SPEC §6, Eddie's docs/TOKEN-SYNC.md): an edit made for one
+ * theme applies only on a page wearing that theme. The state keeps every
+ * theme's edits — a page answers joiners wearing any theme — keyed by
+ * (scope, key), and a page reads the newest write among its own theme's
+ * edits and the unscoped ones. That is exactly what an Eddie display sees,
+ * since it merges only the messages in its scope.
+ */
 export function createRoomState() {
   /** @type {Map<string, Entry>} */
   const entries = new Map();
@@ -29,14 +43,31 @@ export function createRoomState() {
    * older write that arrives late can't bring the token back.
    * `fillOnly` merges only keys this state has never heard of.
    */
-  function merge(props, ts, { fillOnly = false } = {}) {
+  /**
+   * Whether a fill-only answer for (scope, key) would repaint something a page
+   * already shows — Eddie's display skips any key it knows, and it knows only
+   * what is in its scope. An answer for one theme yields to an unscoped entry
+   * or one for that theme; an unscoped answer yields to any entry for the key,
+   * because it is in scope everywhere. (The cost: a page on bfw that heard
+   * only a southleft edit to a key gets no unscoped fill for it.)
+   */
+  function knows(key, scope) {
+    if (entries.has(idOf(ALL, key)) || entries.has(idOf(scope, key))) return true;
+    if (scope !== ALL) return false;
+    for (const entry of entries.values()) if (entry.key === key) return true;
+
+    return false;
+  }
+
+  function merge(props, ts, { fillOnly = false, scope = ALL } = {}) {
     const changed = [];
     for (const [key, value] of Object.entries(props)) {
-      const current = entries.get(key);
-      if (fillOnly && current) continue;
+      const id = idOf(scope, key);
+      const current = entries.get(id);
+      if (fillOnly && knows(key, scope)) continue;
       if (!current || ts > current.ts || (ts === current.ts && String(value) > String(current.value))) {
-        if (!current || current.value !== value) changed.push(key);
-        entries.set(key, { value, ts });
+        if ((!current || current.value !== value) && !changed.includes(key)) changed.push(key);
+        entries.set(id, { key, scope, value, ts });
       }
     }
 
@@ -57,17 +88,19 @@ export function createRoomState() {
       }
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
 
-      return { applied: true, changed: merge(msg.props ?? {}, ts) };
+      return { applied: true, changed: merge(msg.props ?? {}, ts, { scope: scopeOf(msg.scope) }) };
     }
 
+    // A reset clears every theme, whatever scope it carries — as Eddie's
+    // display does, which handles reset before it looks at scope.
     if (op === 'reset') {
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
       resetTs = ts;
       const changed = [];
-      for (const [key, entry] of entries) {
+      for (const [id, entry] of entries) {
         if (entry.ts <= ts) {
-          entries.delete(key);
-          changed.push(key);
+          entries.delete(id);
+          if (!changed.includes(entry.key)) changed.push(entry.key);
         }
       }
 
@@ -95,15 +128,27 @@ export function createRoomState() {
       // replays real writes as sets (snapshotMessages with asSets).
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
 
-      return { applied: true, changed: merge(msg.props ?? {}, ts, { fillOnly: true }) };
+      return { applied: true, changed: merge(msg.props ?? {}, ts, { fillOnly: true, scope: scopeOf(msg.scope) }) };
     }
 
     return { applied: false, reason: `unknown op ${op}`, changed: [] };
   }
 
-  /** The current value of every key still set, as a plain object. Cleared keys are left out. */
-  function props() {
-    return Object.fromEntries([...entries].filter(([, entry]) => entry.value !== null).map(([key, entry]) => [key, entry.value]));
+  /**
+   * The current value of every key still set, as a plain object. Cleared keys
+   * are left out. `inScope(scope)` says which themes' edits this page wears;
+   * unscoped edits always count. Without it, every theme's edits count.
+   * @param {(scope: string) => boolean} [inScope]
+   */
+  function props(inScope = () => true) {
+    const newest = new Map();
+    for (const entry of entries.values()) {
+      if (entry.scope !== ALL && !inScope(entry.scope)) continue;
+      const best = newest.get(entry.key);
+      if (!best || entry.ts > best.ts || (entry.ts === best.ts && String(entry.value) > String(best.value))) newest.set(entry.key, entry);
+    }
+
+    return Object.fromEntries([...newest].filter(([, entry]) => entry.value !== null).map(([key, entry]) => [key, entry.value]));
   }
 
   /**
@@ -130,23 +175,26 @@ export function createRoomState() {
     // One snapshot per distinct write time, so every key keeps the timestamp
     // it was really written at. Promoting an old key to a newer ts would let
     // it beat a write the joiner made a moment after joining.
-    const byTs = new Map();
-    for (const [key, entry] of entries) {
-      if (!byTs.has(entry.ts)) byTs.set(entry.ts, {});
-      byTs.get(entry.ts)[key] = entry.value;
+    // Grouped by theme too, so every answer keeps the scope it was written for.
+    const groups = new Map();
+    for (const entry of entries.values()) {
+      const id = `${entry.ts}\n${entry.scope}`;
+      if (!groups.has(id)) groups.set(id, { ts: entry.ts, scope: entry.scope, props: {} });
+      groups.get(id).props[entry.key] = entry.value;
     }
-    for (const [ts, group] of [...byTs].sort(([a], [b]) => a - b)) {
-      messages.push({ ...createMessage({ room, op: asSets ? 'set' : 'snapshot', from: 'source', props: group }), ts });
+    for (const { ts, scope, props: group } of [...groups.values()].sort((a, b) => a.ts - b.ts)) {
+      const scoped = scope === ALL ? undefined : scope;
+      messages.push({ ...createMessage({ room, op: asSets ? 'set' : 'snapshot', from: 'source', props: group, scope: scoped }), ts });
     }
     if (lock.ts > -Infinity) messages.push({ ...createMessage({ room, op: lock.locked ? 'lock' : 'unlock', from: 'presenter' }), ts: lock.ts });
 
     return messages;
   }
 
-  /** How many keys the room holds, cleared ones included. */
+  /** How many (theme, key) entries the room holds, cleared ones included. */
   const size = () => entries.size;
-  /** Whether the room has heard of this key, cleared or not. */
-  const has = (key) => entries.has(key);
+  /** Whether the room has heard of this key for this theme, cleared or not. */
+  const has = (key, scope) => entries.has(idOf(scopeOf(scope), key));
 
   return {
     apply,

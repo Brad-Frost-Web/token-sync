@@ -138,9 +138,10 @@ Run these from this repo, or call `node packages/cli/bin/token-sync.js` directly
 - Both talk to a relay (`--relay`, default `http://127.0.0.1:8787`). Without `--room` they create one and print its code and presenter key; open the target page in that room.
 - Only properties a stylesheet always defines are sent: anything inside `@media`, `@supports` or `@container` is left out, because one value goes to every page. `!important` is read as the declaration's priority, not part of the value.
 - `--selector ":root"` keeps only blocks whose selector list includes that selector, for a stylesheet that defines several themes.
+- `--scope southleft` sends the edits for that theme only, so pages wearing another theme ignore them. Pair it with `--selector ".southleft"` when one stylesheet defines several themes. Without it, edits are for every theme. (The phone remote and the demo source always send for every theme.)
 - Changes are split into messages the relay accepts, by count and by size, so a full Eddie theme (612 properties) goes through.
 - `--send-initial` sends every property once at start.
-- A value the protocol refuses is not sent, and the CLI says why. A property that disappears from the stylesheet can't be un-set over the wire, so pages keep its last value; the CLI says that too.
+- A value the protocol refuses is not sent, and the CLI says why. A property that disappears from the stylesheet is cleared on every page (sent as `null`).
 
 ## The protocol: `token-sync/1`
 
@@ -152,9 +153,9 @@ One JSON message per change. Eddie's `docs/TOKEN-SYNC.md` is the canonical descr
 
 | Field | Meaning |
 |---|---|
-| `op` | `set`, `reset`, `lock`, `unlock` or `snapshot`. Only a presenter may `reset`, `lock` or `unlock`. A `snapshot` with empty `props` asks the room for its state. One with props answers, and only fills tokens the receiver hasn't heard of. |
+| `op` | `set`, `reset`, `lock`, `unlock` or `snapshot`. Only a presenter may `reset`, `lock` or `unlock`. A `snapshot` with empty `props` asks the room for its state. One with props answers, and only fills tokens the receiver doesn't already show, for its theme or every theme. |
 | `props` | Custom property names, or `contract:` keys: `contract:color.background.brand` is a contract path, and `contract:color.background-brand` is a lab knob that re-derives what hangs off it. `null` clears a token. |
-| `scope` | A theme id or `*`. The lab doesn't act on it yet (#11). |
+| `scope` | A theme id or `*`. An edit for a theme shows only on a page wearing it (`<html class="bfw">`), as on Eddie's displays; absent or `*` means every theme. Pages keep every theme's edits, so they can answer a joiner wearing any theme, and switching theme mid-session shows that theme's edits at once. A page with no theme class shows only unscoped edits. |
 | `fonts` | Up to 8 family names the props use. Validated; the lab loads fonts from the `font-family` values it applies, which name the same families. |
 | `from` | A role: `controller`, `presenter` or `source`. Never an identity. |
 | `ts` | Stamped by the channel (the relay, or the local channel), never the sender. Each key keeps its last write by `ts`. |
@@ -166,7 +167,6 @@ An `ed-r-theme-customizer` and a lab page in the same browser share a room with 
 - When a page joins, it posts an empty snapshot to ask for the room's state. Lab pages answer with their writes grouped by when they happened. A customizer answers with what it has published.
 - A broadcast answer leaves out the last reset. An Eddie display clears everything it has written when any reset arrives, however old, so replaying one would wipe newer writes on every Eddie page in the room.
 - On the relay, a customizer takes the lab's remote transport as its `remoteTransport`.
-- Lab answers carry no `scope` yet (#11), so a display reads them as meant for every theme.
 - Two writes stamped in the same millisecond can settle differently on lab and Eddie pages. The lab picks the larger value; Eddie keeps whichever arrived last.
 - A stamp more than 5 seconds in the future is dropped on broadcast; Eddie pulls one more than a minute ahead back to now. Both share one machine's clock, so an honest message is never near either limit.
 

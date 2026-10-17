@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sep } from 'node:path';
-import { chunk, parseArgs, startsBuild } from '../bin/token-sync.js';
+import { chunk, parseArgs, sendChanges, startsBuild } from '../bin/token-sync.js';
+import { validateMessage } from '../../protocol/src/index.js';
 import { MAX_FRAME_LENGTH } from '../../relay/src/room.js';
 
 test('--name=value works, and a flag never swallows the argument after it', () => {
@@ -21,8 +22,16 @@ test('changes are split into frames the relay accepts, not only by count', () =>
   for (const props of chunks) {
     const frame = JSON.stringify({ kind: 'msg', msg: { v: 1, room: 'room1', op: 'set', from: 'source', props } });
     assert.ok(frame.length <= MAX_FRAME_LENGTH, `${frame.length} > ${MAX_FRAME_LENGTH}`);
-    assert.ok(Object.keys(props).length <= 500);
+    // The protocol refuses a message of more than 400 props whole.
+    assert.equal(validateMessage({ v: 1, room: 'room1', op: 'set', from: 'source', props, ts: 1 }).ok, true);
   }
+});
+
+test('the CLI sends a removed property as a clear, and every change with its --scope', () => {
+  const sent = [];
+  const session = { room: 'room1', set: (props, options) => sent.push({ props, ...options }) };
+  assert.equal(sendChanges(session, { '--ed-a': '1px' }, ['--ed-gone'], 'southleft'), true);
+  assert.deepEqual(sent, [{ props: { '--ed-a': '1px', '--ed-gone': null }, scope: 'southleft' }]);
 });
 
 test('build output never starts a build (Eddie: sources and build/ under one theme folder)', () => {

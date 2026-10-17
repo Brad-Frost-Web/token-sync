@@ -28,7 +28,7 @@ const ROOM = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const CUSTOM_PROPERTY = /^--[a-z0-9_-]{1,126}$/i;
 const CONTRACT_KEY = /^contract:[a-z0-9][a-z0-9.-]{0,120}$/i;
 const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/i;
-const MAX_PROPS = 400;
+export const MAX_PROPS = 400;
 const FONT_FAMILY = /^[A-Za-z0-9 ]{1,64}$/;
 export const MAX_FONTS = 8;
 
