@@ -33,8 +33,14 @@ const EXPORT_DECL = /^export\s+(?:async\s+)?(function\*?|const|class)\s+([A-Za-z
  */
 function togglesTemplate(line, inTemplate = false) {
   // Outside a template, a comment line's backticks are prose (`like this`), not code.
-  const t = line.trim();
-  if (!inTemplate && (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))) return false;
+  let t = line.trim();
+  if (!inTemplate) {
+    // A leading /* … */ is a comment; what follows it on the line is code.
+    t = t.replace(/^\/\*.*?\*\/\s*/, '');
+    if (t === '' || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return false;
+
+    return (t.replace(/\\./g, '').split('`').length - 1) % 2 === 1;
+  }
 
   return (line.replace(/\\./g, '').split('`').length - 1) % 2 === 1;
 }

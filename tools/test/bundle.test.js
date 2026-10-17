@@ -210,3 +210,12 @@ test('backticks in a comment are prose, not the start of a template literal', (t
   assert.equal(out.A, 1);
   assert.equal(out.b(), 2);
 });
+
+test('a comment followed by code that opens a template literal still opens it', (t) => {
+  const dir = fixture(t, { 'a.js': "/* note */ export const css = `\nexport const not = 1;\n// kept\n`;\nexport const after = 2;\n" });
+  for (const stripComments of [false, true]) {
+    const out = vm.runInNewContext(bundle(join(dir, 'a.js'), { stripComments }));
+    assert.equal(out.css, '\nexport const not = 1;\n// kept\n');
+    assert.equal(out.after, 2);
+  }
+});

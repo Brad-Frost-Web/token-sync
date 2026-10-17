@@ -9,16 +9,20 @@
 //   it; let go to see it again with the room's tokens.
 //
 // The sweep is scoped by a class on <html> that exists only during our own
-// transition, so a page's own view transitions are never restyled.
+// transitions, and the overlay lets clicks through to the page. If the page
+// is running a view transition of its own, we don't start one (that would
+// cancel the page's): the change simply lands.
 
 export const WIPE_CLASS = 'token-sync-wiping';
 const STYLE_ID = 'token-sync-wipe-styles';
 const DURATION_MS = 300; // inside the applier's 333 ms damping window, so sweeps never pile up
 
 const CSS = `
+html.${WIPE_CLASS}::view-transition { pointer-events: none; }
 html.${WIPE_CLASS}::view-transition-old(root),
 html.${WIPE_CLASS}::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 html.${WIPE_CLASS}::view-transition-new(root) { animation: token-sync-wipe ${DURATION_MS}ms ease-in-out both; }
+html.${WIPE_CLASS}[dir="rtl"]::view-transition-new(root),
 html.${WIPE_CLASS}:dir(rtl)::view-transition-new(root) { animation-name: token-sync-wipe-rtl; }
 @keyframes token-sync-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
 @keyframes token-sync-wipe-rtl { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
@@ -30,9 +34,13 @@ html.${WIPE_CLASS}:dir(rtl)::view-transition-new(root) { animation-name: token-s
  * @returns {(update: () => void) => void}
  */
 export function createWipe({ document = globalThis.document, matchMedia = globalThis.matchMedia?.bind(globalThis) } = {}) {
+  /** How many of our transitions are running; the class comes off when the last one ends. */
+  let running = 0;
+
   return (update) => {
     const reduced = matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    if (!document?.startViewTransition || reduced) {
+    const pagesOwn = document?.activeViewTransition && running === 0;
+    if (!document?.startViewTransition || reduced || pagesOwn) {
       update();
 
       return;
@@ -45,7 +53,14 @@ export function createWipe({ document = globalThis.document, matchMedia = global
     }
     const root = document.documentElement;
     root.classList.add(WIPE_CLASS);
-    const done = () => root.classList.remove(WIPE_CLASS);
+    running += 1;
+    let ended = false;
+    const done = () => {
+      if (ended) return;
+      ended = true;
+      running -= 1;
+      if (running === 0) root.classList.remove(WIPE_CLASS);
+    };
     try {
       const transition = document.startViewTransition(update);
       transition.finished.then(done, done);
@@ -56,14 +71,18 @@ export function createWipe({ document = globalThis.document, matchMedia = global
   };
 }
 
-/** Is focus somewhere a person is typing? Then a key press is text, not a command. */
-function typingIn(target) {
-  const el = /** @type {HTMLElement | null} */ (target);
+/**
+ * Is this key press going into something a person is typing in? Reads the
+ * real origin of the event (composedPath()[0]), which reaches inside shadow
+ * roots, closed ones included.
+ */
+function typingIn(event) {
+  const el = /** @type {HTMLElement | null} */ (event.composedPath?.()[0] ?? event.target);
   if (!el) return false;
   if (el.isContentEditable) return true;
   const tag = el.tagName?.toLowerCase();
 
-  return tag === 'input' || tag === 'textarea' || tag === 'select' || (el.shadowRoot != null && typingIn(el.shadowRoot.activeElement));
+  return tag === 'input' || tag === 'textarea' || tag === 'select';
 }
 
 /**
@@ -75,15 +94,25 @@ function typingIn(target) {
  * @returns {() => void} removes the listeners
  */
 export function holdToCompare(applier, { target = globalThis.window, key = '\\' } = {}) {
+  // The physical key that started the hold. Released by that key whatever it
+  // types by then (Shift changes \ to | while it's down).
+  let heldCode = null;
   const down = (event) => {
-    if (event.key !== key || event.repeat || typingIn(event.target)) return;
+    if (event.key !== key || event.repeat || event.ctrlKey || event.metaKey || typingIn(event)) return;
+    heldCode = event.code ?? key;
     applier.hold(true);
   };
   const up = (event) => {
-    if (event.key === key) applier.hold(false);
+    if (heldCode !== null && (event.code ?? event.key) === heldCode) {
+      heldCode = null;
+      applier.hold(false);
+    }
   };
   // Letting go of the key outside the window must not leave the page stuck on "before".
-  const blur = () => applier.hold(false);
+  const blur = () => {
+    heldCode = null;
+    applier.hold(false);
+  };
   if (typeof target?.addEventListener !== 'function') return () => {};
   target.addEventListener('keydown', down);
   target.addEventListener('keyup', up);

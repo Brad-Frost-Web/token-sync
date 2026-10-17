@@ -137,3 +137,110 @@ test('the compare key: hold for before, release for after, and never while typin
   key('keydown', { key: '\\' });
   assert.equal(calls.length, 4);
 });
+
+/** A transition hook like the real one: `update` runs later, not now. */
+function deferredTransition() {
+  const queue = [];
+
+  return { queue, transition: (update, info) => queue.push({ update, info }), runAll: () => queue.splice(0).forEach((t) => t.update()) };
+}
+
+test('leaving the room while a sweep is pending writes nothing afterwards', () => {
+  const root = fakeRoot({ '--brand': '#be6700' });
+  const later = deferredTransition();
+  const applier = createApplier({ root, readComputed: root.readComputed, transition: later.transition });
+  applier.render({ '--brand': '#000000' }); // planned, not yet written
+  applier.destroy(); // the tab leaves the room
+  later.runAll(); // the View Transition's callback finally runs
+  assert.equal(root.get('--brand'), undefined);
+});
+
+test('a late transition callback writes the newest state, not the state when it was scheduled', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    const root = fakeRoot({ '--brand': '#be6700' });
+    const later = deferredTransition();
+    const applier = createApplier({ root, readComputed: root.readComputed, timers: { now: Date.now, setTimeout, clearTimeout }, transition: later.transition });
+    applier.render({ '--brand': '#000000' });
+    mock.timers.tick(400);
+    applier.render({ '--brand': '#111111' });
+    later.runAll();
+    assert.equal(root.get('--brand'), '#111111');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('the transition is told whether the compare key or the room asked for it', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    const root = fakeRoot({ '--brand': '#be6700' });
+    const later = deferredTransition();
+    const applies = [];
+    const applier = createApplier({ root, readComputed: root.readComputed, timers: { now: Date.now, setTimeout, clearTimeout }, transition: later.transition, onApply: (i) => applies.push(i.cause) });
+    applier.render({ '--brand': '#000000' });
+    assert.deepEqual(later.queue.map((t) => t.info.cause), ['render']);
+    later.runAll();
+    mock.timers.tick(400);
+    applier.hold(true);
+    assert.deepEqual(later.queue.map((t) => t.info.cause), ['hold']);
+    later.runAll();
+    assert.deepEqual(applies, ['render', 'hold']);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a refused value while held keeps its last good value for when the hold ends', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    const root = fakeRoot({ '--brand': '#be6700' });
+    const applier = createApplier({ root, readComputed: root.readComputed, timers: { now: Date.now, setTimeout, clearTimeout } });
+    applier.render({ '--brand': '#000000' });
+    mock.timers.tick(400);
+    applier.hold(true);
+    applier.render({ '--brand': '12px' }); // refused: not a colour
+    mock.timers.tick(400);
+    applier.hold(false);
+    mock.timers.tick(400);
+    assert.equal(root.get('--brand'), '#000000');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('overlapping sweeps keep the class until the last one ends', async () => {
+  const { doc, classes, transitions } = fakeDocument();
+  const wipe = createWipe({ document: doc, matchMedia: motion(false) });
+  wipe(() => {});
+  wipe(() => {});
+  transitions[0].finish();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(classes.has(WIPE_CLASS), true);
+  transitions[1].finish();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(classes.has(WIPE_CLASS), false);
+});
+
+test("the page's own view transition is never cancelled by ours", () => {
+  const { doc, transitions } = fakeDocument();
+  doc.activeViewTransition = {}; // the page is mid-transition
+  let ran = false;
+  createWipe({ document: doc, matchMedia: motion(false) })(() => (ran = true));
+  assert.equal(ran, true);
+  assert.equal(transitions.length, 0);
+});
+
+test('the hold is released by the same physical key, whatever it types by then', () => {
+  const listeners = new Map();
+  const target = { addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: () => {} };
+  const calls = [];
+  holdToCompare({ hold: (on) => calls.push(on) }, { target });
+  listeners.get('keydown')({ key: '\\', code: 'Backslash' });
+  listeners.get('keyup')({ key: '|', code: 'Backslash' }); // Shift went down meanwhile
+  listeners.get('keydown')({ key: '\\', code: 'Backslash', ctrlKey: true }); // a shortcut, not a hold
+  listeners.get('keydown')({ key: '\\', code: 'Backslash', composedPath: () => [{ tagName: 'INPUT' }] }); // typing inside a shadow root
+  assert.deepEqual(calls, [true, false]);
+});

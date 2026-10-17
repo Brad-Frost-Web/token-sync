@@ -7,8 +7,8 @@
 // this tab — and keeps doing so for the rest of the tab's session, so you can
 // click around the site. ?token-sync=off leaves.
 //
-// While it's on, each change sweeps across the page, and holding \ shows the
-// page as it was before the room touched it.
+// While it's on, holding \ shows the page as it was before the room touched
+// it, with a sweep each way.
 //
 // Preview only: it changes this tab's custom properties and nothing else.
 // Real visitors never carry the parameter, so they never see a change.
@@ -18,6 +18,8 @@ import { isRoom } from '../../protocol/src/index.js';
 
 export const PARAM = 'token-sync';
 export const STORAGE_KEY = 'token-sync:room';
+/** `<meta name="token-sync-wipe" content="changes">` sweeps every change in, not only the compare toggle. */
+export const WIPE_META = 'token-sync-wipe';
 
 /**
  * Which room, if any, this tab should be in. The URL wins; otherwise the room
@@ -83,15 +85,24 @@ export function start({
   // its age is just how long ago that write happened.
   let newest = { ts: 0, op: 'set' };
   const emit = (type, detail) => document.dispatchEvent(new CustomEvent(type, { detail: { room, ...detail } }));
+  // The sweep plays when the compare key is pressed and let go. A page that
+  // wants every live change to sweep in says so:
+  // <meta name="token-sync-wipe" content="changes">. Never under reduced motion.
+  const wipe = createWipe({ document });
+  const sweepChanges = document.querySelector?.(`meta[name="${WIPE_META}"]`)?.content === 'changes';
   const applier = createApplier({
     root: document.documentElement,
-    // Each change sweeps in (instantly under prefers-reduced-motion).
-    transition: createWipe({ document }),
+    transition: (update, { cause }) => (sweepChanges || cause === 'hold' ? wipe(update) : update()),
     // Read after onChange below has recorded the newest message, whichever
     // order the two arrive in — so a damped change reports its real delay.
-    onApply: ({ changed, at }) =>
+    onApply: ({ changed, at, cause }) =>
       queueMicrotask(() =>
-        emit('token-sync:apply', { changed, op: newest.op, latencyMs: newest.op === 'snapshot' ? null : at - newest.ts }),
+        emit('token-sync:apply', {
+          changed,
+          // A compare toggle isn't a delivery, and a snapshot's age isn't one either.
+          op: cause === 'hold' ? 'hold' : newest.op,
+          latencyMs: cause === 'hold' || newest.op === 'snapshot' ? null : at - newest.ts,
+        }),
       ),
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
@@ -114,7 +125,7 @@ export function start({
   };
   document.documentElement.dataset.tokenSync = room;
   const leave = requested === undefined ? `Add ?${PARAM}=off to the URL to leave.` : 'Run the bookmarklet again and type "off" to leave.';
-  console.info(`token-sync: previewing room "${room}" in this tab. ${leave}`);
+  console.info(`token-sync: previewing room "${room}" in this tab. Hold \\ to see the page without the room's tokens. ${leave}`);
   globalThis.tokenSync = session;
 
   return session;

@@ -31,7 +31,7 @@ The demo pages load Eddie from unpkg, so they need a network connection to rende
 <script type="module" src="/path/to/packages/script/src/token-sync.js"></script>
 ```
 
-While a tab is in a room, each change sweeps across the page with a View Transition (300 ms, from the inline-start edge). Hold <kbd>\</kbd> to see the page as it was before the room touched it, and let go to see it again. Under `prefers-reduced-motion`, changes land instantly with no sweep.
+While a tab is in a room, hold <kbd>\</kbd> to see the page as it was before the room touched it, and let go to see it again. Each way, the new look sweeps in from the inline-start edge with a View Transition (300 ms). To sweep every live change in as well, as you might on a stage display, add `<meta name="token-sync-wipe" content="changes">`. Under `prefers-reduced-motion` nothing sweeps; changes land instantly. The sweep never cancels a view transition the page is running, and clicks pass through it.
 
 The script does nothing on an ordinary page view. Visit the page with `?token-sync=<room>` and that tab joins the room, then stays in it for the rest of the tab's session as you click around. `?token-sync=off` leaves.
 
