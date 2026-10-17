@@ -15,7 +15,7 @@
   "projectName": "token-sync",
   "branchModel": "trunk",
   "framework": "none",
-  "eddieIntegration": false,
+  "eddieIntegration": true,
   "eddieRoot": "/Users/brad/Sites/eddie-design-system",
   "syncOnUpgrade": false,
   "hardGates": {
