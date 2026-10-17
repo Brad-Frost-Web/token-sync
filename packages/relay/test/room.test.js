@@ -95,7 +95,7 @@ test('a joiner gets the room as it stands, at each write\'s real time', () => {
   assert.equal(frames[0].kind, 'welcome');
   assert.deepEqual(
     frames.slice(1).map((f) => [f.msg.op, f.msg.ts]),
-    [['snapshot', first], ['lock', first + 10]],
+    [['set', first], ['lock', first + 10]],
   );
 });
 
@@ -130,4 +130,24 @@ test('junk frames spend from the same bucket, and a flood gets one warning, not 
   for (let i = 0; i < 20; i += 1) replies.push(...room.receive(client, 'not json'));
   assert.equal(replies.filter((r) => /slow down/.test(r.frame.error)).length, 1);
   assert.ok(replies.length <= 6);
+});
+
+test("an empty snapshot is Eddie's request: the relay answers that client alone, with real writes as sets", () => {
+  const { room, hello } = setup();
+  const presenter = hello(KEY);
+  const written = send(room, presenter, { op: 'set', from: 'presenter', props: { '--a': '1px' } })[0].frame.msg.ts;
+  send(room, presenter, { op: 'set', from: 'presenter', props: { '--b': null } });
+  const asker = hello();
+  const out = send(room, asker, { op: 'snapshot', from: 'source', props: {} });
+  assert.ok(out.every((o) => o.to === 'sender'));
+  assert.deepEqual(out[0].frame.msg, { v: 1, room: 'r', op: 'set', from: 'source', props: { '--a': '1px' }, ts: written });
+  assert.equal(out[1].frame.msg.props['--b'], null);
+  // An answer is still refused: the relay holds the state.
+  assert.equal(send(room, asker, { op: 'snapshot', from: 'source', props: { '--a': '2px' } })[0].frame.kind, 'error');
+});
+
+test('fonts travel through the relay with the props', () => {
+  const { room, hello } = setup();
+  const out = send(room, hello(), { op: 'set', from: 'source', props: { '--ed-font': '"Fraunces", serif' }, fonts: ['Fraunces'] });
+  assert.deepEqual(out[0].frame.msg.fonts, ['Fraunces']);
 });

@@ -10,7 +10,9 @@
 // - local:     one page, in memory. Tests, and a source and applier that share a page.
 // - broadcast: every same-origin tab and frame on this machine, via BroadcastChannel.
 //              No network: the mode that survives the venue wifi (Q19).
-// The remote (WebSocket) transport arrives with the relay.
+// - remote:    a room on the relay, over WebSocket.
+
+import { isSnapshotRequest } from '../../protocol/src/index.js';
 
 /**
  * A clock that never runs backwards and never stamps a write before one it
@@ -45,6 +47,14 @@ export const MAX_FUTURE_MS = 5000;
 /** @param {{ ts?: unknown }} msg @param {() => number} now */
 function fromTheFuture(msg, now) {
   return typeof msg?.ts === 'number' && msg.ts > now() + MAX_FUTURE_MS;
+}
+
+/** Eddie's customizer posts to `token-sync:<room>` (docs/TOKEN-SYNC.md). */
+export const BROADCAST_PREFIX = 'token-sync:';
+
+/** The empty snapshot that asks a room for its state. */
+export function createSnapshotRequest(room, ts) {
+  return { v: 1, room, op: 'snapshot', props: {}, from: 'source', ts };
 }
 
 const defaultHubs = new Map();
@@ -98,41 +108,61 @@ export function createLocalTransport({ room, hub = defaultHubs, clock = createCl
 }
 
 /**
- * Same-origin tabs and frames on one machine. BroadcastChannel never echoes
- * to the sender, so the transport delivers its own messages to itself — every
+ * Same-origin tabs and frames on one machine, on the channel Eddie's
+ * customizer uses (`token-sync:<room>`, raw messages; docs/TOKEN-SYNC.md), so
+ * a customizer and a lab page share a room. BroadcastChannel never echoes to
+ * the sender, so the transport delivers its own messages to itself — every
  * peer, the sender included, folds the same stamped message into its state.
  *
- * @param {{ room: string, clock?: ReturnType<typeof createClock>, getSnapshot?: () => object[], BroadcastChannelImpl?: typeof BroadcastChannel }} options
+ * Joining posts an empty snapshot: a request. Anyone in the room with state
+ * answers, a lab page with its writes grouped by when they happened, a
+ * customizer with what it published. The answer leaves out the last reset
+ * (see snapshotMessages).
+ *
+ * @param {{ room: string, clock?: ReturnType<typeof createClock>, getSnapshot?: (options?: object) => object[], BroadcastChannelImpl?: typeof BroadcastChannel, now?: () => number }} options
  */
 export function createBroadcastTransport({ room, clock = createClock(), getSnapshot, BroadcastChannelImpl = globalThis.BroadcastChannel, now = () => Date.now() }) {
   if (typeof BroadcastChannelImpl !== 'function') {
     throw new Error('token-sync: BroadcastChannel is not available here; use the local or remote transport');
   }
-  const channel = new BroadcastChannelImpl(`token-sync/1:${room}`);
+  const channel = new BroadcastChannelImpl(`${BROADCAST_PREFIX}${room}`);
   const listeners = new Set();
   const deliver = (msg) => {
     if (fromTheFuture(msg, now)) return;
     clock.observe(msg.ts);
-    for (const fn of listeners) fn(msg);
+    for (const fn of listeners) {
+      // One listener that throws must not cost the others the message.
+      try {
+        fn(msg);
+      } catch (error) {
+        console.error('token-sync: a room listener threw', error);
+      }
+    }
   };
 
   channel.onmessage = (event) => {
-    const frame = event.data;
-    if (!frame || typeof frame !== 'object') return;
-    if (frame.kind === 'msg') deliver(frame.msg);
-    if (frame.kind === 'hello' && getSnapshot) {
-      // Snapshot messages keep the times their writes really happened —
-      // restamping them "now" would let old state beat a newer write.
-      for (const msg of getSnapshot()) channel.postMessage({ kind: 'msg', msg });
+    const msg = event.data;
+    // A stranger on the channel is ignored; connect() reports a malformed message.
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+    if (isSnapshotRequest(msg)) {
+      if (msg.room !== room || !getSnapshot) return;
+      // Answers keep the times their writes really happened — restamping
+      // them "now" would let old state beat a newer write.
+      for (const answer of getSnapshot({ withReset: false })) if (answer.op !== 'reset') channel.postMessage(answer);
+
+      return;
     }
+    // Every sender on this channel shares this machine's clock; a message
+    // that arrives unstamped is stamped on arrival, as Eddie does.
+    deliver(typeof msg.ts === 'number' ? msg : { ...msg, ts: clock.stamp() });
   };
   // Ask whoever is already in the room for the state.
-  channel.postMessage({ kind: 'hello' });
+  channel.postMessage(createSnapshotRequest(room, clock.stamp()));
 
   return {
     publish(msg) {
       const stamped = { ...msg, ts: clock.stamp() };
-      channel.postMessage({ kind: 'msg', msg: stamped });
+      channel.postMessage(stamped);
       deliver(stamped);
 
       return stamped;

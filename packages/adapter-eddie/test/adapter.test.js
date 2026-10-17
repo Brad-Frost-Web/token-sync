@@ -82,11 +82,19 @@ test('what the solver cannot fix is said out loud, never hidden', () => {
   assert.ok(status.problems.some((n) => /Couldn't keep .* readable/.test(n)));
 });
 
-test('a raw value outside the contract passes through untouched, nothing else changes, and it is counted as unchecked', () => {
+test('a raw value outside the contract passes through untouched, and only a colour is counted as unchecked', () => {
   const adapter = createEddieAdapter({ readComputed: bfwTheme() });
   const { props, status } = adapter.resolve({ '--my-site-gap': '2rem' });
   assert.deepEqual(props, { '--my-site-gap': '2rem' });
-  assert.deepEqual(status, { moved: [], problems: [], unchecked: 1 });
+  assert.deepEqual(status, { moved: [], problems: [], unchecked: 0 });
+  assert.equal(adapter.resolve({ '--my-site-color-accent': '#ff00aa' }).status.unchecked, 1);
+});
+
+test('a non-colour contract token (a radius) passes through with nothing to report', () => {
+  const adapter = createEddieAdapter({ readComputed: bfwTheme() });
+  const { props, status } = adapter.resolve({ '--ed-theme-border-radius-md': '18px' });
+  assert.deepEqual(props, { '--ed-theme-border-radius-md': '18px' });
+  assert.deepEqual(status, { moved: [], problems: [], unchecked: 0 });
 });
 
 test('a knob only writes what it changed: an unrelated knob leaves the brand alone, and a knob at the theme\'s own value writes nothing', () => {
@@ -135,4 +143,14 @@ test('the theme as shipped needs nothing: a no-op change nudges nothing', () => 
 
 test('a background the solver eases is described without a percentage', () => {
   assert.equal(describeMove({ path: 'button.primary.color.background.active', kind: 'background' }), 'Eased button primary background active so the text on it stays readable.');
+});
+
+test("a contract path key (Eddie's form) is that token's property, contrast-solved like any raw value on the contract", () => {
+  const adapter = createEddieAdapter({ readComputed: bfwTheme() });
+  const path = 'color.background.brand';
+  assert.ok(knownPaths().includes(path));
+  const { props, refused } = adapter.resolve({ [`contract:${path}`]: '#1b4dd8' });
+  assert.deepEqual(refused, []);
+  assert.equal(props[pathToCustomProperty(path)], '#1b4dd8');
+  assert.deepEqual(adapter.resolve({ 'contract:color.nope.nope': '#1b4dd8' }).refused.length, 1);
 });

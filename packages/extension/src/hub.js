@@ -146,7 +146,9 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     // Heartbeats from the page are what keep this background alive; nothing to do with them.
     port.onMessage?.addListener?.(() => {});
     port.postMessage({ kind: 'config', room: session.room });
-    for (const msg of state.snapshotMessages(session.room)) port.postMessage({ kind: 'msg', msg });
+    // As sets at their real times: a tab coming back holds stale values, and a
+    // snapshot would only fill in what it has never heard of.
+    for (const msg of state.snapshotMessages(session.room, { asSets: true })) port.postMessage({ kind: 'msg', msg });
   }
 
   /** The synced tab finished loading a page: bring the room back, if the site is allowed. */

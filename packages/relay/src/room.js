@@ -17,9 +17,15 @@
 // Frames on the socket (JSON):
 //   client → relay  { kind: 'hello', key? }  then  { kind: 'msg', msg }
 //   relay → client  { kind: 'welcome', presenter }  { kind: 'msg', msg }  { kind: 'error', error }
+//
+// Catching up: after welcome, and whenever a client sends an empty snapshot
+// (Eddie's request), the relay replies to that client alone with the room's
+// writes, replayed as sets at the times they were made, then the lock state.
+// A snapshot with props is refused: the relay holds the state, so nobody
+// needs to answer for it.
 
 import { createClock } from '../../client/src/transports.js';
-import { createRoomState, validateMessage } from '../../protocol/src/index.js';
+import { createRoomState, isSnapshotRequest, validateMessage } from '../../protocol/src/index.js';
 
 /** Longest frame accepted, in UTF-16 code units (what `string.length` counts). */
 export const MAX_FRAME_LENGTH = 16 * 1024;
@@ -53,6 +59,9 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
   function connect() {
     return /** @type {Client} */ ({ presenter: false, ready: false, tokens: maxMessagesPerSecond, refilled: now() });
   }
+
+  /** The room so far, for one client: real writes as sets, so they win over stale values by their times. */
+  const catchUp = () => state.snapshotMessages(room, { asSets: true }).map((msg) => ({ to: 'sender', frame: { kind: 'msg', msg } }));
 
   const error = (message) => [{ to: 'sender', frame: { kind: 'error', error: message } }];
 
@@ -92,10 +101,7 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
       client.ready = true;
       client.presenter = typeof frame.key === 'string' && frame.key.length > 0 && frame.key === presenterKey;
 
-      return [
-        { to: 'sender', frame: { kind: 'welcome', presenter: client.presenter } },
-        ...state.snapshotMessages(room).map((msg) => ({ to: 'sender', frame: { kind: 'msg', msg } })),
-      ];
+      return [{ to: 'sender', frame: { kind: 'welcome', presenter: client.presenter } }, ...catchUp()];
     }
     if (!client.ready) return error('say hello first');
     if (frame?.kind !== 'msg') return error('unknown frame kind');
@@ -104,6 +110,7 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     const check = validateMessage(unstamped, { requireTs: false });
     if (!check.ok) return error(check.errors.join('; '));
     if (unstamped.room !== room) return error('wrong room');
+    if (isSnapshotRequest(unstamped)) return catchUp();
     if (unstamped.op === 'snapshot') return error('snapshots come from the relay');
     if (unstamped.from === 'presenter' && !client.presenter) return error('only the presenter may speak as presenter');
     if (state.locked && unstamped.op === 'set' && !client.presenter) return error('the room is locked');
@@ -128,7 +135,7 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     connect,
     receive,
     /** Messages a host can store, and pass back as `restore` after a restart. */
-    snapshot: () => state.snapshotMessages(room),
+    snapshot: () => state.snapshotMessages(room, { asSets: true }),
     get locked() {
       return state.locked;
     },

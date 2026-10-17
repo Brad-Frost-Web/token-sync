@@ -1,9 +1,19 @@
 // The token-sync/1 wire message (FEATURE-SPEC §6, eddie-design-system#2447).
 //
-//   { v, room, op, props, scope, from, ts }
+//   { v, room, op, props, scope, from, ts, fonts? }
 //
 // One message per change, JSON. `ts` is assigned by the relay (or the local
 // channel standing in for one), never trusted from a client clock.
+//
+// Eddie's docs/TOKEN-SYNC.md is the canonical description; this follows it:
+// - `null` in props clears a token.
+// - A `snapshot` with empty props asks the room for its state; one with props
+//   answers, and an answer only fills tokens the receiver hasn't heard of.
+// - `contract:<path>` names an Eddie contract path (contract:color.background.brand);
+//   `contract:<group>.<knob>` (contract:color.background-brand) is a lab knob.
+// - `fonts` names the families the props use. The lab loads families from the
+//   font-family values it applies, which covers the same names, so it is
+//   validated and otherwise ignored.
 
 import { checkSafety } from './values.js';
 
@@ -18,10 +28,17 @@ const CUSTOM_PROPERTY = /^--[a-z0-9_-]{1,120}$/i;
 const CONTRACT_KEY = /^contract:[a-z0-9][a-z0-9.-]{0,120}$/i;
 const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const MAX_PROPS = 500;
+const FONT_FAMILY = /^[A-Za-z0-9 ]{1,64}$/;
+export const MAX_FONTS = 8;
 
 /** Is this a key `props` may carry? A custom property, or a contract knob. */
 export function isPropKey(key) {
   return typeof key === 'string' && (CUSTOM_PROPERTY.test(key) || CONTRACT_KEY.test(key));
+}
+
+/** Is this snapshot a request for the room's state, rather than an answer? */
+export function isSnapshotRequest(msg) {
+  return msg?.op === 'snapshot' && (!msg.props || Object.keys(msg.props).length === 0);
 }
 
 /** Is this a valid room code? */
@@ -45,7 +62,7 @@ export function validateMessage(msg, { requireTs = true } = {}) {
   }
   const m = /** @type {Record<string, unknown>} */ (msg);
 
-  const known = new Set(['v', 'room', 'op', 'props', 'scope', 'from', 'ts']);
+  const known = new Set(['v', 'room', 'op', 'props', 'scope', 'from', 'ts', 'fonts']);
   for (const key of Object.keys(m)) {
     if (!known.has(key)) errors.push(`unknown field "${key}"`);
   }
@@ -58,6 +75,11 @@ export function validateMessage(msg, { requireTs = true } = {}) {
   }
   if (requireTs || m.ts !== undefined) {
     if (typeof m.ts !== 'number' || !Number.isFinite(m.ts) || m.ts < 0) errors.push('ts must be a non-negative number');
+  }
+  if (m.fonts !== undefined) {
+    if (!Array.isArray(m.fonts) || m.fonts.length > MAX_FONTS || !m.fonts.every((f) => typeof f === 'string' && FONT_FAMILY.test(f))) {
+      errors.push(`fonts must be at most ${MAX_FONTS} family names (letters, digits and spaces)`);
+    }
   }
   if (PRESENTER_OPS.includes(/** @type {string} */ (m.op)) && m.from !== 'presenter') {
     errors.push(`${m.op} may only come from a presenter`);
@@ -76,6 +98,8 @@ export function validateMessage(msg, { requireTs = true } = {}) {
           errors.push(`"${key}" is not a custom property or contract:<path> key`);
           continue;
         }
+        // null clears the token; it carries nothing to check.
+        if (value === null) continue;
         const safety = checkSafety(value);
         if (!safety.ok) errors.push(`${key}: ${safety.reason}`);
       }
@@ -91,7 +115,7 @@ export function validateMessage(msg, { requireTs = true } = {}) {
 
 /**
  * Build a message, leaving `ts` for the channel to stamp.
- * @param {{ room: string, op: string, from: string, props?: Record<string, string>, scope?: string }} fields
+ * @param {{ room: string, op: string, from: string, props?: Record<string, string | null>, scope?: string }} fields
  */
 export function createMessage({ room, op, from, props, scope }) {
   const msg = { v: PROTOCOL_VERSION, room, op, from };

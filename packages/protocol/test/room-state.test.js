@@ -119,3 +119,37 @@ test('a peer rejoining with stale state catches up on a reset and an unlock it m
   assert.deepEqual(stale.props(), { '--b': '2px' });
   assert.equal(stale.locked, false);
 });
+
+test('null clears a token, and an older write that arrives late cannot bring it back', () => {
+  const state = createRoomState();
+  state.apply({ op: 'set', from: 'source', props: { '--a': '1px', '--b': '2px' }, ts: 10 });
+  state.apply({ op: 'set', from: 'source', props: { '--a': null }, ts: 20 });
+  assert.deepEqual(state.props(), { '--b': '2px' });
+  state.apply({ op: 'set', from: 'source', props: { '--a': '9px' }, ts: 15 });
+  assert.deepEqual(state.props(), { '--b': '2px' });
+  state.apply({ op: 'set', from: 'source', props: { '--a': '3px' }, ts: 30 });
+  assert.deepEqual(state.props(), { '--a': '3px', '--b': '2px' });
+});
+
+test('a snapshot answer only fills tokens this state has never heard of', () => {
+  const state = createRoomState();
+  state.apply({ op: 'set', from: 'source', props: { '--a': '1px' }, ts: 10 });
+  state.apply({ op: 'set', from: 'source', props: { '--c': null }, ts: 11 });
+  // Stamped later than the write, as a customizer's answer is; it still loses.
+  const { changed } = state.apply({ op: 'snapshot', from: 'source', props: { '--a': '9px', '--b': '2px', '--c': '5px' }, ts: 99 });
+  assert.deepEqual(changed, ['--b']);
+  assert.deepEqual(state.props(), { '--a': '1px', '--b': '2px' });
+});
+
+test('catch-up as sets brings a stale peer up to date; a broadcast answer leaves the reset out', () => {
+  const room = createRoomState();
+  room.apply({ op: 'set', from: 'source', props: { '--a': '1px' }, ts: 10 });
+  room.apply({ op: 'reset', from: 'presenter', ts: 20 });
+  room.apply({ op: 'set', from: 'source', props: { '--a': '3px' }, ts: 30 });
+  const stale = createRoomState();
+  stale.apply({ op: 'set', from: 'source', props: { '--a': '2px' }, ts: 25 });
+  for (const msg of room.snapshotMessages('r', { asSets: true })) stale.apply(msg);
+  assert.deepEqual(stale.props(), { '--a': '3px' });
+  assert.deepEqual(room.snapshotMessages('r', { asSets: true }).map((m) => m.op), ['reset', 'set']);
+  assert.deepEqual(room.snapshotMessages('r', { withReset: false }).map((m) => m.op), ['snapshot']);
+});
