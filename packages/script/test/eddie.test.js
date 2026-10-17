@@ -14,20 +14,18 @@ test('the adapter appears once the page shows Eddie\'s tokens, even if they arri
 });
 
 /** A page with ed-toast defined, recording what toasts show. */
-function fakePage() {
+function fakePage({ defined = true } = {}) {
   const body = { children: [], append: (el) => body.children.push(el) };
   const created = [];
   const document = {
     body,
     createElement: (tag) => {
-      const el = { tag, children: [], replaceChildren: (...kids) => (el.children = kids), remove: () => body.children.splice(body.children.indexOf(el), 1) };
+      const el = { tag, children: [], matches: (sel) => sel === ':defined' && defined, replaceChildren: (...kids) => (el.children = kids), remove: () => body.children.splice(body.children.indexOf(el), 1) };
       created.push(el);
 
       return el;
     },
   };
-  globalThis.customElements = { get: (name) => name === 'ed-toast' };
-
   return { document, body, shown: () => body.children.map((t) => t.children.map((p) => p.textContent)) };
 }
 
@@ -36,7 +34,6 @@ test('one toast, reused: nudges show briefly, problems stay until they clear', (
   console.info = () => {};
   t.after(() => {
     console.info = info;
-    delete globalThis.customElements;
   });
   const page = fakePage();
   const timers = [];
@@ -56,10 +53,21 @@ test('raw values outside the contract are announced as unchecked when more arriv
   console.info = () => {};
   t.after(() => {
     console.info = info;
-    delete globalThis.customElements;
   });
   const page = fakePage();
   const notify = createNotifier(page.document, { setTimeout: () => {}, clearTimeout: () => {} });
   notify({ moved: [], problems: [], unchecked: 2 });
   assert.match(page.shown()[0][0], /2 values outside Eddie's contract applied as sent/);
+});
+
+test('a page that does not define ed-toast gets the console, and no stray element', (t) => {
+  const info = console.info;
+  const lines = [];
+  console.info = (line) => lines.push(line);
+  t.after(() => (console.info = info));
+  const page = fakePage({ defined: false });
+  const notify = createNotifier(page.document, { setTimeout: () => {}, clearTimeout: () => {} });
+  notify({ moved: ['Nudged a'], problems: [], unchecked: 0 });
+  assert.equal(page.body.children.length, 0);
+  assert.match(lines[0], /Nudged a/);
 });
