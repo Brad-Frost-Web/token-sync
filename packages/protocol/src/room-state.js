@@ -13,7 +13,7 @@
 import { createMessage } from './message.js';
 
 /**
- * @typedef {{ value: string, ts: number }} Entry
+ * @typedef {{ value: string | null, ts: number }} Entry  null: cleared at ts
  * @typedef {{ applied: boolean, reason?: string, changed: string[] }} ApplyResult
  */
 
@@ -23,12 +23,18 @@ export function createRoomState() {
   let resetTs = -Infinity;
   let lock = { locked: false, ts: -Infinity };
 
-  /** Last-write-wins merge of `props` written at `ts`. Returns the keys whose value changed. */
-  function merge(props, ts) {
+  /**
+   * Last-write-wins merge of `props` written at `ts`. Returns the keys whose
+   * value changed. A null value is a clear: it is kept, with its time, so an
+   * older write that arrives late can't bring the token back.
+   * `fillOnly` merges only keys this state has never heard of.
+   */
+  function merge(props, ts, { fillOnly = false } = {}) {
     const changed = [];
     for (const [key, value] of Object.entries(props)) {
       const current = entries.get(key);
-      if (!current || ts > current.ts || (ts === current.ts && value > current.value)) {
+      if (fillOnly && current) continue;
+      if (!current || ts > current.ts || (ts === current.ts && String(value) > String(current.value))) {
         if (!current || current.value !== value) changed.push(key);
         entries.set(key, { value, ts });
       }
@@ -80,23 +86,24 @@ export function createRoomState() {
     }
 
     if (op === 'snapshot') {
-      // A snapshot is this room's state as the sender knew it at `ts` — the
-      // newest write it had seen, not the moment it replied. It merges key by
-      // key under the same last-write-wins rule as a set, and never clears:
-      // a late joiner fills in, and a peer that already has a newer write to
-      // a key keeps it. (Replacing the state instead let one tab's reply to
-      // another tab's "hello" wipe a write made in the same moment.)
+      // An empty snapshot is a request; the transport or the relay answers it.
+      // An answer only fills keys this state has never heard of (Eddie's rule):
+      // an Eddie customizer answers with what it published, stamped when it
+      // answers, so letting that stamp win would put back a value someone has
+      // since changed. It never clears either. A peer that comes back with
+      // stale state is brought up to date by the relay's catch-up, which
+      // replays real writes as sets (snapshotMessages with asSets).
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
 
-      return { applied: true, changed: merge(msg.props ?? {}, ts) };
+      return { applied: true, changed: merge(msg.props ?? {}, ts, { fillOnly: true }) };
     }
 
     return { applied: false, reason: `unknown op ${op}`, changed: [] };
   }
 
-  /** The current value of every key, as a plain object. */
+  /** The current value of every key still set, as a plain object. Cleared keys are left out. */
   function props() {
-    return Object.fromEntries([...entries].map(([key, entry]) => [key, entry.value]));
+    return Object.fromEntries([...entries].filter(([, entry]) => entry.value !== null).map(([key, entry]) => [key, entry.value]));
   }
 
   /**
@@ -107,10 +114,19 @@ export function createRoomState() {
    * state — so the snapshot also carries the last reset and the lock state
    * (unlocked included). Without them, a display that missed a reset or an
    * unlock while it was away would keep the cleared tokens and stay locked.
+   *
+   * `asSets` (the relay's catch-up) replays the writes as sets, so they win
+   * over a returning peer's stale values by their real times; snapshots only
+   * fill. `withReset: false` (a broadcast answer) leaves the reset out: an
+   * Eddie display clears everything it wrote on any reset, however old, so a
+   * replayed one would wipe newer writes on every Eddie page in the room.
+   *
+   * @param {string} room
+   * @param {{ asSets?: boolean, withReset?: boolean }} [options]
    */
-  function snapshotMessages(room) {
+  function snapshotMessages(room, { asSets = false, withReset = true } = {}) {
     const messages = [];
-    if (resetTs > -Infinity) messages.push({ ...createMessage({ room, op: 'reset', from: 'presenter' }), ts: resetTs });
+    if (withReset && resetTs > -Infinity) messages.push({ ...createMessage({ room, op: 'reset', from: 'presenter' }), ts: resetTs });
     // One snapshot per distinct write time, so every key keeps the timestamp
     // it was really written at. Promoting an old key to a newer ts would let
     // it beat a write the joiner made a moment after joining.
@@ -120,21 +136,24 @@ export function createRoomState() {
       byTs.get(entry.ts)[key] = entry.value;
     }
     for (const [ts, group] of [...byTs].sort(([a], [b]) => a - b)) {
-      messages.push({ ...createMessage({ room, op: 'snapshot', from: 'source', props: group }), ts });
+      messages.push({ ...createMessage({ room, op: asSets ? 'set' : 'snapshot', from: 'source', props: group }), ts });
     }
     if (lock.ts > -Infinity) messages.push({ ...createMessage({ room, op: lock.locked ? 'lock' : 'unlock', from: 'presenter' }), ts: lock.ts });
 
     return messages;
   }
 
-  /** How many keys the room holds. */
+  /** How many keys the room holds, cleared ones included. */
   const size = () => entries.size;
+  /** Whether the room has heard of this key, cleared or not. */
+  const has = (key) => entries.has(key);
 
   return {
     apply,
     props,
     snapshotMessages,
     size,
+    has,
     get locked() {
       return lock.locked;
     },

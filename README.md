@@ -96,7 +96,7 @@ The relay is where the rules are enforced for real:
 - Only the connection that said hello with the presenter key may reset, lock, unlock or speak as `presenter`.
 - A lock refuses every write that doesn't come from the presenter, whatever role it claims.
 - Each connection may send at most 20 messages a second.
-- A joiner gets the room's state as snapshots, at each write's real time.
+- A joiner gets the room's writes again as sets, at each write's real time, then the lock state. An empty `snapshot` from a client asks for the same catch-up.
 
 ### Two relays, one room core
 
@@ -144,7 +144,7 @@ Run these from this repo, or call `node packages/cli/bin/token-sync.js` directly
 
 ## The protocol: `token-sync/1`
 
-One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-system#2447](https://github.com/Brad-Frost-Web/eddie-design-system/pull/2447):
+One JSON message per change. Eddie's `docs/TOKEN-SYNC.md` is the canonical description, from [eddie-design-system#2447](https://github.com/Brad-Frost-Web/eddie-design-system/pull/2447):
 
 ```js
 { v: 1, room: 'detach', op: 'set', props: { '--ed-theme-border-radius-md': '1rem' }, scope: '*', from: 'controller', ts: 1760700000000 }
@@ -152,10 +152,23 @@ One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-s
 
 | Field | Meaning |
 |---|---|
-| `op` | `set`, `reset`, `lock`, `unlock` or `snapshot` (catch up a late joiner). Only a presenter may `reset`, `lock` or `unlock`. |
-| `props` | Custom property names, or `contract:<path>` keys for Eddie contract knobs |
+| `op` | `set`, `reset`, `lock`, `unlock` or `snapshot`. Only a presenter may `reset`, `lock` or `unlock`. A `snapshot` with empty `props` asks the room for its state. One with props answers, and only fills tokens the receiver hasn't heard of. |
+| `props` | Custom property names, or `contract:` keys: `contract:color.background.brand` is a contract path, and `contract:color.background-brand` is a lab knob that re-derives what hangs off it. `null` clears a token. |
+| `scope` | A theme id or `*`. The lab doesn't act on it yet (#11). |
+| `fonts` | Up to 8 family names the props use. Validated; the lab loads fonts from the `font-family` values it applies, which name the same families. |
 | `from` | A role: `controller`, `presenter` or `source`. Never an identity. |
 | `ts` | Stamped by the channel (the relay, or the local channel), never the sender. Each key keeps its last write by `ts`. |
+
+### With Eddie's theme customizer
+
+An `ed-r-theme-customizer` and a lab page in the same browser share a room with nothing else running. The customizer needs `transport="broadcast"` and the same `room`. Both use the channel `token-sync:<room>` and post plain messages, so either side can be the source or the display.
+
+- When a page joins, it posts an empty snapshot to ask for the room's state. Lab pages answer with their writes grouped by when they happened. A customizer answers with what it has published.
+- A broadcast answer leaves out the last reset. An Eddie display clears everything it has written when any reset arrives, however old, so replaying one would wipe newer writes on every Eddie page in the room.
+- On the relay, a customizer takes the lab's remote transport as its `remoteTransport`.
+- Lab answers carry no `scope` yet (#11), so a display reads them as meant for every theme.
+- Two writes stamped in the same millisecond can settle differently on lab and Eddie pages. The lab picks the larger value; Eddie keeps whichever arrived last.
+- A stamp more than 5 seconds in the future is dropped on broadcast; Eddie pulls one more than a minute ahead back to now. Both share one machine's clock, so an honest message is never near either limit.
 
 ### Fonts
 
@@ -168,7 +181,7 @@ Set a `font-family` token to a family the page doesn't have, and the applier fet
 
 ### Guardrails
 
-- **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max` and `var()` may appear, so nothing that fetches can get in. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
+- **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max`, the easings `cubic-bezier`/`steps` and `var()` may appear, so nothing that fetches can get in. A refused value is dropped on its own, as Eddie does, and the rest of the message still lands. A message with something wrong outside its props, such as its op, room, role or stamp, is refused whole. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
 - **`setProperty` only.** Values are never joined into CSS text, so a value can't become a rule.
 - **Damping.** A page changes at most 3 times a second, whatever arrives (WCAG 2.3.1). The first change lands immediately. Changes arriving faster than that are combined, and the latest one lands at the end of each 333 ms window. So a lone edit lands in a few milliseconds, and an edit inside a burst can wait up to a third of a second.
 - **Reset and lock.** A presenter can put every page back to its theme, or make controllers read-only. Over `broadcast` every tab is a presenter. Over the relay, only the holder of the room's presenter key is.
@@ -182,7 +195,7 @@ On an Eddie site, use the Eddie drop-in, `packages/script/src/token-sync-eddie.j
 
 - **Knobs.** `contract:color.background-brand` is one value that Eddie expands into every token derived from it: buttons, links, text on brand. Only what a knob actually changes is written; an accent knob touches its accent and the text on it, nothing else. Colour and button knobs are supported (`contract:color.<knob>`, `contract:buttons.<knob>`). Border, shadow, motion and gradient knobs are [#22](https://github.com/Brad-Frost-Web/token-sync/issues/22).
 - **Legibility.** When a knob, or a raw colour that lands on a contract path, changes a colour, the contract's solver checks every foreground/background pair against WCAG AA. It uses the theme's own button type scale, so buttons get the large-text floor only where the theme earns it. It may move any *text* colour, including a raw one, to keep it legible. It keeps authored backgrounds where they are.
-- **Said out loud.** What the solver moved shows on the page briefly, in one `ed-toast` ("Nudged content brand 36% darker to stay readable."). What it couldn't fix, or couldn't check (a colour that isn't hex), stays on screen until it clears. Raw values outside the contract are applied as sent, and the page says how many went unchecked. Everything also goes to the console, which is all a page without `ed-toast` gets.
+- **Said out loud.** What the solver moved shows on the page briefly, in one `ed-toast` ("Nudged content brand 36% darker to stay readable."). What it couldn't fix, or couldn't check (a colour that isn't hex), stays on screen until it clears. Raw values outside the contract are applied as sent, and the page says how many colours among them went unchecked. Everything also goes to the console, which is all a page without `ed-toast` gets.
 
 The bookmarklet leaves the adapter out to keep its URL short.
 

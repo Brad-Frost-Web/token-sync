@@ -170,6 +170,7 @@ export function start({
     transport: channel,
     role: 'controller',
     applier,
+    keyFor: adapter?.keyFor ?? null,
     onChange: ({ message }) => {
       if (message.ts >= newest.ts) newest = { ts: message.ts, op: message.op };
     },

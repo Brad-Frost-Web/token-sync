@@ -2,7 +2,7 @@
 // page: the Eddie drop-in, and the browser extension's content script. No
 // autostart here — importing this module starts nothing.
 
-import { createEddieAdapter, isEddiePage } from '../../adapter-eddie/src/adapter.js';
+import { contractPathProperty, createEddieAdapter, isEddiePage } from '../../adapter-eddie/src/adapter.js';
 
 const IDLE = { moved: [], problems: [], unchecked: 0 };
 
@@ -25,6 +25,14 @@ export function lazyEddieAdapter({ readComputed }) {
 
       return { props: rest, refused, status: IDLE };
     },
+    /**
+     * The room-state key for a prop key. A contract path is its custom
+     * property, as in Eddie's applier, so `contract:color.background.brand`
+     * and `--ed-theme-color-background-brand` are one token: last write wins
+     * between them, and a null to either clears it. The path list is fixed,
+     * so this needs no page.
+     */
+    keyFor: (key) => (key.startsWith('contract:') && contractPathProperty(key)) || key,
   };
 }
 

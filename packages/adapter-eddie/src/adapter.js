@@ -6,7 +6,8 @@
 //
 // - `contract:<path>` knobs. `contract:color.background-brand` is one value
 //   that Eddie expands into every token derived from it (buttons, links, text
-//   on brand), with `expandContract()`.
+//   on brand), with `expandContract()`. `contract:color.background.brand`
+//   (a contract path, Eddie's form) is just that token's custom property.
 // - Legibility. Whenever a knob, or a raw value that lands on a contract
 //   path, changes a colour, `solve()` checks the contract's foreground/
 //   background pairs and moves *derived* text colours until each clears
@@ -28,6 +29,22 @@ import { buttonScale } from '../../../node_modules/@brad-frost-web/eddie-design-
 
 const PREFIX = 'contract:';
 const COLOR_KEYS = new Set(COLOR_KNOBS.map((k) => k.key));
+const PATHS = new Set(knownPaths());
+/** A contract path that holds a colour: color.background.brand, link.color.content.hover. */
+const isColourPath = (path) => /(^|\.)color(\.|$)/.test(path);
+/** A token named as a colour, the same test Eddie's applier uses. */
+const isColourName = (name) => /-color-|-color$/.test(name);
+
+/**
+ * `contract:color.background.brand` names a contract path (Eddie's form,
+ * docs/TOKEN-SYNC.md): it is that path's custom property, nothing more.
+ * `contract:color.background-brand` is a knob, which re-derives what hangs off it.
+ */
+export function contractPathProperty(name) {
+  const path = name.slice(PREFIX.length);
+
+  return PATHS.has(path) ? pathToCustomProperty(path) : null;
+}
 const BUTTON_KEYS = new Set(BUTTON_KNOBS.map((k) => k.key));
 
 /** Does this page look like an Eddie page? It defines Eddie's theme tokens. */
@@ -113,7 +130,8 @@ export function createEddieAdapter({ readComputed }) {
     let knobs = 0;
     let unchecked = 0;
 
-    for (const [name, value] of Object.entries(props)) {
+    for (const [key, value] of Object.entries(props)) {
+      const name = (key.startsWith(PREFIX) && contractPathProperty(key)) || key;
       if (name.startsWith(PREFIX)) {
         const knob = parseKnob(name);
         if ('error' in knob) {
@@ -130,13 +148,16 @@ export function createEddieAdapter({ readComputed }) {
         }
         continue;
       }
+      // Only colours take part in contrast: the contract also knows radii,
+      // borders and the like, and those pass through with nothing to say.
       const path = customPropertyToPath(name);
-      const hex = path && toHex(value);
-      if (path && hex) onContract[path] = hex;
+      const colourPath = path && isColourPath(path) ? path : null;
+      const hex = colourPath && toHex(value);
+      if (colourPath && hex) onContract[colourPath] = hex;
       else {
         passthrough[name] = value;
-        if (path) problems.push(`Couldn't contrast-check ${name}: only hex colours can be checked, so ${value} was applied as sent.`);
-        else unchecked += 1;
+        if (colourPath) problems.push(`Couldn't contrast-check ${name}: only hex colours can be checked, so ${value} was applied as sent.`);
+        else if (!path && isColourName(name)) unchecked += 1;
       }
     }
 

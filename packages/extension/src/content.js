@@ -31,12 +31,13 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
   // Google Fonts for a font-family token this page doesn't have (spec §10 Q3),
   // only what was applied, gone when the tab leaves the room.
   const fonts = createFontLoader({ document });
+  const eddie = lazyEddieAdapter({ readComputed });
   const applier = createApplier({
     root: document.documentElement,
     onApply: ({ changed }) => {
       for (const name of changed) if (/font-family/.test(name)) fonts.ensure(document.documentElement.style.getPropertyValue(name));
     },
-    resolve: lazyEddieAdapter({ readComputed }).resolve,
+    resolve: eddie.resolve,
     onResolved: createNotifier(document),
     transition: (update, { cause }) => (cause === 'hold' ? wipe(update) : update()),
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
@@ -83,6 +84,7 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
         room: frame.room,
         role: 'controller',
         applier,
+        keyFor: eddie.keyFor,
         transport: {
           publish: (msg) => msg, // this page only applies
           subscribe: (fn) => {

@@ -67,8 +67,11 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
       onStatus: ({ state: s }) => (status = { ...status, state: s }),
       onRelayError: (error) => (status = { ...status, error }),
     });
-    transport.subscribe((msg) => {
-      if (!validateMessage(msg).ok || msg.room !== session?.room) return;
+    transport.subscribe((incoming) => {
+      const check = validateMessage(incoming);
+      if (!check.ok || check.message.room !== session?.room) return;
+      // Only the props that passed travel on to the tabs.
+      const msg = check.message;
       if (state.apply(msg).applied) broadcast({ kind: 'msg', msg });
     });
   }
@@ -146,7 +149,9 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     // Heartbeats from the page are what keep this background alive; nothing to do with them.
     port.onMessage?.addListener?.(() => {});
     port.postMessage({ kind: 'config', room: session.room });
-    for (const msg of state.snapshotMessages(session.room)) port.postMessage({ kind: 'msg', msg });
+    // As sets at their real times: a tab coming back holds stale values, and a
+    // snapshot would only fill in what it has never heard of.
+    for (const msg of state.snapshotMessages(session.room, { asSets: true })) port.postMessage({ kind: 'msg', msg });
   }
 
   /** The synced tab finished loading a page: bring the room back, if the site is allowed. */

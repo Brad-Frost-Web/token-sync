@@ -7,7 +7,7 @@
 // Every incoming message is validated here, whatever transport it came on —
 // an applier never trusts the wire.
 
-import { createMessage, createRoomState, isRoom, validateMessage } from '../../protocol/src/index.js';
+import { createMessage, createRoomState, isRoom, isSnapshotRequest, validateMessage } from '../../protocol/src/index.js';
 import { createBroadcastTransport, createLocalTransport } from './transports.js';
 
 /**
@@ -19,14 +19,16 @@ import { createBroadcastTransport, createLocalTransport } from './transports.js'
  *   applier?: { render(props: Record<string, string>): void, destroy(): void },
  *   onChange?: (info: { props: Record<string, string>, changed: string[], message: object, locked: boolean }) => void,
  *   onError?: (info: { errors: string[], message: unknown }) => void,
- * }} options `presenter` grants reset and lock. Over `broadcast` every tab is a
+ *   keyFor?: (key: string) => string,
+ * }} options `keyFor` names the room-state key for a prop key; a design
+ *   system's adapter uses it to make two spellings of one token one key. `presenter` grants reset and lock. Over `broadcast` every tab is a
  *   presenter (spec §8). Over the relay the relay decides, by presenter key,
  *   and a transport exposing `isPresenter` (the remote one) answers for it.
  */
-export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {} }) {
+export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {}, keyFor = null }) {
   if (!isRoom(room)) throw new Error(`token-sync: "${room}" is not a valid room code`);
   const state = createRoomState();
-  const getSnapshot = () => state.snapshotMessages(room);
+  const getSnapshot = (options) => state.snapshotMessages(room, options);
 
   const channel =
     transport === 'broadcast'
@@ -35,14 +37,22 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
         ? createLocalTransport({ room, getSnapshot })
         : transport;
 
-  const unsubscribe = channel.subscribe((message) => {
-    const result = validateMessage(message);
+  const unsubscribe = channel.subscribe((incoming) => {
+    const normalized = keyFor && incoming?.props && typeof incoming.props === 'object'
+      ? { ...incoming, props: Object.fromEntries(Object.entries(incoming.props).map(([key, value]) => [keyFor(key), value])) }
+      : incoming;
+    const result = validateMessage(normalized);
     if (!result.ok) {
-      onError({ errors: result.errors, message });
+      onError({ errors: result.errors, message: normalized });
 
       return;
     }
+    // The props that passed; the rest are reported and dropped one by one.
+    const { message, refused } = result;
+    if (refused.length) onError({ errors: refused.map((r) => `${r.name}: ${r.reason}`), message: normalized });
     if (message.room !== room) return;
+    // A request for the room's state: the transport or the relay answers it.
+    if (isSnapshotRequest(message)) return;
     const outcome = state.apply(message);
     if (!outcome.applied) return;
     applier?.render(state.props());
@@ -53,6 +63,7 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
     const message = createMessage({ room, op, from, props });
     const result = validateMessage(message, { requireTs: false });
     if (!result.ok) throw new Error(`token-sync: refused to send — ${result.errors.join('; ')}`);
+    if (result.refused.length) throw new Error(`token-sync: refused to send — ${result.refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`);
 
     return channel.publish(message);
   }

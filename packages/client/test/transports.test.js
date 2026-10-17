@@ -80,7 +80,7 @@ test('broadcast: rooms do not hear each other', async () => {
 });
 
 test('a stamp far in the future is dropped, so it cannot push every later write behind it', async (t) => {
-  const forger = new BroadcastChannel('token-sync/1:bc-future');
+  const forger = new BroadcastChannel('token-sync:bc-future');
   const peer = createBroadcastTransport({ room: 'bc-future' });
   t.after(() => {
     forger.close();
@@ -88,10 +88,54 @@ test('a stamp far in the future is dropped, so it cannot push every later write 
   });
   const heard = [];
   peer.subscribe((m) => heard.push(m));
-  forger.postMessage({ kind: 'msg', msg: { v: 1, room: 'bc-future', op: 'reset', from: 'presenter', ts: Number.MAX_VALUE } });
+  forger.postMessage({ v: 1, room: 'bc-future', op: 'reset', from: 'presenter', ts: Number.MAX_VALUE });
   await nextTick();
   assert.deepEqual(heard, []);
   // And the peer's own clock was not dragged forward.
   const next = peer.publish(msg({ '--x': '1px' }));
   assert.ok(next.ts < Date.now() + 1000);
+});
+
+test('broadcast: junk on the channel is ignored, not thrown on', async (t) => {
+  const stranger = new BroadcastChannel('token-sync:bc-junk');
+  const peer = createBroadcastTransport({ room: 'bc-junk' });
+  t.after(() => {
+    stranger.close();
+    peer.close();
+  });
+  const heard = [];
+  peer.subscribe((m) => heard.push(m));
+  for (const junk of [null, 'hello', 42, [1, 2], { kind: 'msg' }]) stranger.postMessage(junk);
+  await nextTick();
+  // An object reaches connect(), which validates and reports it; nothing threw.
+  assert.equal(heard.length, 1);
+  assert.equal(typeof heard[0].ts, 'number');
+});
+
+test('broadcast: joining asks the room with an empty snapshot, and the answer leaves the reset out', async (t) => {
+  const watcher = new BroadcastChannel('token-sync:bc-ask');
+  const seen = [];
+  watcher.onmessage = (event) => seen.push(event.data);
+  const host = createBroadcastTransport({
+    room: 'bc-ask',
+    getSnapshot: (options) => [
+      ...(options?.withReset === false ? [] : [{ v: 1, room: 'bc-ask', op: 'reset', from: 'presenter', ts: 5 }]),
+      { v: 1, room: 'bc-ask', op: 'snapshot', from: 'source', props: { '--brand': '#123456' }, ts: 42 },
+    ],
+  });
+  t.after(() => {
+    watcher.close();
+    host.close();
+  });
+  const joiner = createBroadcastTransport({ room: 'bc-ask' });
+  t.after(() => joiner.close());
+  await nextTick();
+  const isRequest = (m) => m.op === 'snapshot' && Object.keys(m.props).length === 0;
+  // The host asked when it joined; so did the joiner.
+  assert.equal(seen.filter(isRequest).length, 2);
+  assert.ok(seen.filter(isRequest).every((m) => m.room === 'bc-ask'));
+  // The host answers each request with its writes, never the reset.
+  const answers = seen.filter((m) => !isRequest(m));
+  assert.ok(answers.length >= 1);
+  assert.ok(answers.every((m) => m.op === 'snapshot' && m.ts === 42));
 });
