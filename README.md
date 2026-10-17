@@ -156,6 +156,15 @@ One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-s
 | `from` | A role: `controller`, `presenter` or `source`. Never an identity. |
 | `ts` | Stamped by the channel (the relay, or the local channel), never the sender. Each key keeps its last write by `ts`. |
 
+### Fonts
+
+Set a `font-family` token to a family the page doesn't have, and the applier fetches it from Google Fonts for the preview: `--ed-theme-typography-headline-lg-font-family: "Fraunces", serif`.
+
+- A family the page already has, from its own `@font-face` rules, is never requested.
+- Family names may only hold letters, digits and spaces.
+- The request URL is built with the URL API.
+- Nothing is fetched outside a session, and the links come out when the tab leaves the room.
+
 ### Guardrails
 
 - **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max` and `var()` may appear, so nothing that fetches can get in. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
@@ -189,7 +198,7 @@ The bookmarklet leaves the adapter out to keep its URL short.
 | `cli` | `token-sync watch`, `poll` and `relay` | Built |
 | `remote` | The phone remote | Built (interim, until Eddie #2447) |
 
-Also built: the before/after wipe and hold-to-compare key (`packages/client/src/wipe.js`). Planned: Google Fonts sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)).
+Also built: the before/after wipe and hold-to-compare key (`packages/client/src/wipe.js`), and Google Fonts sync (`packages/client/src/fonts.js`).
 
 The packages are plain ES modules with no runtime dependencies. They import each other by relative path, so a browser can load them straight from disk, and `npm run build` makes the single-file versions.
 
@@ -210,7 +219,7 @@ Documented per AGENTS.md §1.6:
 - **Vanilla JS with no framework, no build and no Eddie runtime dependency** in the packages. They run inside other people's pages, so they carry nothing those pages didn't ask for. The lab's own UI (the demo pages here, and later the remote and the extension popup) is built from Eddie.
 - **The contract is imported by relative path into `node_modules`** (`../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/…`). The same file then runs unbundled in a browser, in Node, and through the bundler. The demo server serves that one folder.
 - **Our own bundler instead of a third-party one.** `tools/bundle.js` covers the handful of import/export forms these packages use and refuses the rest, which kept the build free of dependencies. If the packages ever need syntax it refuses, adopting esbuild (pinned) is the move, not stretching the bundler.
-- **Google Fonts.** AGENTS.md §2.2 forbids Google Fonts links. The applier's planned font sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)) will request from `fonts.googleapis.com` / `fonts.gstatic.com`, but only in an activated preview session. Brad decided this in FEATURE-SPEC §10 Q3. It's preview-only by construction, and nobody should copy the pattern into a shipping product.
+- **Google Fonts.** AGENTS.md §2.2 forbids Google Fonts links. Token Sync's font sync requests from `fonts.googleapis.com` (which serves files from `fonts.gstatic.com`), but only while a tab is in a room, and the links are removed when it leaves. Brad decided this in FEATURE-SPEC §10 Q3. It's preview-only by construction, and nobody should copy the pattern into a shipping product.
 
 ## Process
 

@@ -17,7 +17,7 @@
 // Preview only: it changes this tab's custom properties and nothing else.
 // Real visitors never carry the parameter, so they never see a change.
 
-import { connect, createApplier, createRemoteTransport, createWipe, holdToCompare } from '../../client/src/index.js';
+import { connect, createApplier, createFontLoader, createRemoteTransport, createWipe, holdToCompare } from '../../client/src/index.js';
 import { isRoom } from '../../protocol/src/index.js';
 
 export const PARAM = 'token-sync';
@@ -159,13 +159,17 @@ export function start({
     (relay
       ? createRemoteTransport({ url: relay, onRelayError: (message) => console.warn(`token-sync: the relay said: ${message}`) })
       : 'broadcast');
+  const fonts = createFontLoader({ document });
   const session = connect({
     room,
     transport: channel,
     role: 'controller',
     applier,
-    onChange: ({ message }) => {
+    onChange: ({ message, props, changed }) => {
       if (message.ts >= newest.ts) newest = { ts: message.ts, op: message.op };
+      // A font-family token naming a family this page doesn't have: fetch it
+      // from Google Fonts, for this preview only (spec §10 Q3).
+      for (const name of changed) if (/font-family/.test(name) && props[name]) fonts.ensure(props[name]);
     },
     onError: ({ errors }) => console.warn(`token-sync: dropped a message — ${errors.join('; ')}`),
   });
@@ -175,6 +179,7 @@ export function start({
   session.close = () => {
     stopComparing();
     closeSession();
+    fonts.remove();
   };
   document.documentElement.dataset.tokenSync = room;
   const leave = requested === undefined ? `Add ?${PARAM}=off to the URL to leave.` : 'Run the bookmarklet again and type "off" to leave.';
