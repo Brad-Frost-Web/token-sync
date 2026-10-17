@@ -148,3 +148,120 @@ export function createBroadcastTransport({ room, clock = createClock(), getSnaps
     },
   };
 }
+
+/**
+ * A room on a relay, over WebSocket. The relay does what a local channel does
+ * for itself — stamps `ts`, answers joiners with snapshots — and also holds
+ * the presenter key and the lock, so this transport stamps nothing and
+ * enforces nothing: it carries frames.
+ *
+ * Sends made before the relay says welcome are queued, and the socket
+ * reconnects with backoff (rejoining picks the state back up from the
+ * relay's snapshot, resets and unlocks included). A queued write is stamped
+ * when it reaches the relay, so after an outage it can overwrite a newer
+ * write someone else made meanwhile.
+ *
+ * @param {{
+ *   url: string,
+ *   presenterKey?: string,
+ *   WebSocketImpl?: typeof WebSocket,
+ *   onStatus?: (status: { state: 'connecting' | 'open' | 'closed', presenter: boolean }) => void,
+ *   onRelayError?: (message: string) => void,
+ *   maxQueue?: number,
+ * }} options `url` is the room's socket, e.g. wss://relay.example/rooms/detach/socket
+ */
+export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globalThis.WebSocket, onStatus = () => {}, onRelayError = () => {}, maxQueue = 100 }) {
+  if (typeof WebSocketImpl !== 'function') throw new Error('token-sync: WebSocket is not available here');
+  const listeners = new Set();
+  let queue = [];
+  let socket = null;
+  let welcomed = false;
+  let presenter = false;
+  let closedByUs = false;
+  let retry = 0;
+  let timer = null;
+  /** Connections in a row that closed before the relay said welcome. */
+  let failures = 0;
+
+  const status = (state) => onStatus({ state, presenter });
+
+  function open() {
+    welcomed = false;
+    status('connecting');
+    socket = new WebSocketImpl(url);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify(presenterKey ? { kind: 'hello', key: presenterKey } : { kind: 'hello' }));
+    });
+    socket.addEventListener('message', (event) => {
+      let frame;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (frame?.kind === 'welcome') {
+        // Backoff resets only once the relay has actually let us in: a relay
+        // that accepts and then closes (a deleted room) keeps backing off.
+        retry = 0;
+        failures = 0;
+        welcomed = true;
+        presenter = frame.presenter === true;
+        status('open');
+        const pending = queue;
+        queue = [];
+        for (const msg of pending) socket.send(JSON.stringify({ kind: 'msg', msg }));
+      } else if (frame?.kind === 'msg') {
+        for (const fn of listeners) fn(frame.msg);
+      } else if (frame?.kind === 'error') {
+        onRelayError(String(frame.error));
+      }
+    });
+    socket.addEventListener('close', () => {
+      if (!welcomed) {
+        failures += 1;
+        if (failures === 3) onRelayError(`can't join this room on the relay (${url}); check the relay is running and the room exists. Still retrying.`);
+      }
+      welcomed = false;
+      status('closed');
+      if (closedByUs) return;
+      // 0.5 s, 1 s, 2 s … capped at 10 s.
+      const delay = Math.min(10000, 500 * 2 ** retry);
+      retry += 1;
+      timer = setTimeout(open, delay);
+    });
+  }
+  open();
+
+  return {
+    publish(msg) {
+      if (closedByUs) return msg;
+      if (welcomed) socket.send(JSON.stringify({ kind: 'msg', msg }));
+      else {
+        queue.push(msg);
+        if (queue.length > maxQueue) queue.shift();
+      }
+
+      return msg;
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+
+      return () => listeners.delete(fn);
+    },
+    close() {
+      closedByUs = true;
+      clearTimeout(timer);
+      listeners.clear();
+      socket?.close();
+    },
+    /**
+     * Whether the relay accepted this connection's presenter key. Before the
+     * relay has answered, a transport holding a key assumes yes, so a reset
+     * sent straight after connecting is queued rather than refused here; the
+     * relay still has the final say.
+     */
+    get isPresenter() {
+      return welcomed ? presenter : Boolean(presenterKey);
+    },
+  };
+}

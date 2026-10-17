@@ -104,3 +104,18 @@ test('a snapshot older than the last reset is dropped', () => {
   assert.equal(result.applied, false);
   assert.deepEqual(state.props(), {});
 });
+
+test('a peer rejoining with stale state catches up on a reset and an unlock it missed', () => {
+  const room = createRoomState();
+  const stale = createRoomState();
+  for (const msg of [set({ '--a': '1px' }, 10), op('lock', 11)]) {
+    room.apply(msg);
+    stale.apply(msg); // the display saw these, then dropped off
+  }
+  room.apply(op('reset', 12));
+  room.apply(op('unlock', 13));
+  room.apply(set({ '--b': '2px' }, 14, 'presenter'));
+  for (const msg of room.snapshotMessages('r')) stale.apply(msg);
+  assert.deepEqual(stale.props(), { '--b': '2px' });
+  assert.equal(stale.locked, false);
+});

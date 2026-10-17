@@ -10,6 +10,18 @@
     <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/css/fonts.css" />
     <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/core/css/base.css" />
     <script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script>
+    <!--
+      Demo only: ?relay=<url> writes the relay meta tag, so this page can follow a
+      room on a local relay. A real site declares its relay in its own markup,
+      <meta name="token-sync-relay" content="https://…">, never from the URL.
+    -->
+    <script type="module">
+      const relay = new URLSearchParams(location.search).get('relay') ?? sessionStorage.getItem('token-sync:demo-relay');
+      if (relay) {
+        sessionStorage.setItem('token-sync:demo-relay', relay);
+        document.head.append(Object.assign(document.createElement('meta'), { name: 'token-sync-relay', content: relay }));
+      }
+    </script>
     <!-- The whole integration: one script tag. Inert unless the URL says ?token-sync=<room>. -->
     <script type="module" src="../packages/script/src/token-sync.js"></script>
   </head>

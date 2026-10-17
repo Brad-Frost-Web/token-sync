@@ -43,6 +43,49 @@ To preview a site you can't add a script to, run `npm start` and open <http://12
 
 Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency (see Deviations). It refuses anything it doesn't translate (default exports, namespace imports, `export let`, multiple declarators, dynamic `import()`, non-relative imports, cycles, and an import of a name its module doesn't export) rather than guessing.
 
+## Rooms across machines: the relay
+
+`BroadcastChannel` only reaches tabs in one browser. To put phones, a second laptop or a stage display in the same room, run a relay:
+
+```bash
+npm run relay           # the Node relay on http://127.0.0.1:8787, no dependencies
+```
+
+Then open the source page with `?relay=http://127.0.0.1:8787`. It creates a room, holds the room's **presenter key**, and links the target page to that room.
+
+A site follows a relay by declaring it in its own markup, next to the drop-in:
+
+```html
+<meta name="token-sync-relay" content="https://relay.example" />
+```
+
+The relay URL never comes from the address bar, so a crafted link can't point a visitor's tab at someone else's relay. A link can still put a visitor's tab in any room on *your* relay, and the guardrails are what keep that harmless. Without the meta tag, the drop-in stays on `BroadcastChannel`, and an invalid one is ignored with a console warning.
+
+| Endpoint | Does |
+|---|---|
+| `POST /rooms` | Creates a room. Returns `{ room, presenterKey }`. Send `{ "room": "detach" }` to choose the code. |
+| `GET /rooms/<room>` | 200 if the room exists, 404 if not |
+| `GET /rooms/<room>/socket` | WebSocket. Send `{ kind: 'hello', key? }`, then `{ kind: 'msg', msg }`. The relay answers with `welcome`, `msg` and `error` frames. |
+
+The relay is where the rules are enforced for real:
+
+- It stamps every `ts` and discards whatever a client sent.
+- Only the connection that said hello with the presenter key may reset, lock, unlock or speak as `presenter`.
+- A lock refuses every write that doesn't come from the presenter, whatever role it claims.
+- Each connection may send at most 20 messages a second.
+- A joiner gets the room's state as snapshots, at each write's real time.
+
+### Two relays, one room core
+
+- **Node** (`packages/relay/node/server.js`): no dependencies, including its WebSocket server, so anyone can self-host. Rooms live in memory.
+- **Cloudflare** (`packages/relay/worker/`): a Worker routing to one Durable Object per room. The presenter key and the room's state live in the object's storage, so they survive eviction. Sockets use the hibernation API. A room is deleted a day after its last connection closes.
+
+Both wrap `packages/relay/src/room.js`, so self-hosting changes nothing about the guarantees. The same protocol tests run against either: `npm test` runs them against the Node relay, and `npm run relay:worker` then `npm run relay:worker:test` runs them against the Durable Object under `wrangler dev`.
+
+The demo's latency readout subtracts the relay's timestamp from the viewer's clock. On one machine that's a true delivery time. Across machines it includes clock skew, so the spec's "p95 under 300 ms over the hosted relay" can't be measured until the relay is deployed and measured from one clock.
+
+**The Cloudflare relay has not been deployed.** That's Brad's call: `npm exec --no -w packages/relay -- wrangler deploy` once approved.
+
 ## The protocol: `token-sync/1`
 
 One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-system#2447](https://github.com/Brad-Frost-Web/eddie-design-system/pull/2447):
@@ -63,7 +106,7 @@ One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-s
 - **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max` and `var()` may appear, so nothing that fetches can get in. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
 - **`setProperty` only.** Values are never joined into CSS text, so a value can't become a rule.
 - **Damping.** A page changes at most 3 times a second, whatever arrives (WCAG 2.3.1). The first change lands immediately. Changes arriving faster than that are combined, and the latest one lands at the end of each 333 ms window. So a lone edit lands in a few milliseconds, and an edit inside a burst can wait up to a third of a second.
-- **Reset and lock.** A presenter can put every page back to its theme, or make controllers read-only. Over `broadcast` every tab is a presenter. Over the relay, the relay issues a presenter key ([#2](https://github.com/Brad-Frost-Web/token-sync/issues/2)).
+- **Reset and lock.** A presenter can put every page back to its theme, or make controllers read-only. Over `broadcast` every tab is a presenter. Over the relay, only the holder of the room's presenter key is.
 - **Last write wins per token**, ordered by the channel's timestamps. Ties resolve the same way on every peer, so every tab ends up showing the same state.
 
 ### Raw overrides only move the token you send
@@ -75,9 +118,9 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | Package | Job | Status |
 |---|---|---|
 | `protocol` | `token-sync/1` validation, value checks, per-key last-write-wins | Built |
-| `client` | Transports (`local`, `broadcast`) and the applier | Built. `remote` arrives with the relay. |
+| `client` | Transports (`local`, `broadcast`, `remote`) and the applier | Built |
 | `script` | The `?token-sync=<room>` drop-in | Built |
-| `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | [#2](https://github.com/Brad-Frost-Web/token-sync/issues/2) |
+| `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | Built, not deployed |
 | `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
 | `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
 | `cli` | `token-sync watch` and `token-sync poll` | [#5](https://github.com/Brad-Frost-Web/token-sync/issues/5), [#6](https://github.com/Brad-Frost-Web/token-sync/issues/6) |
@@ -99,6 +142,8 @@ Node's built-in test runner. The suites cover the bundler and the built bookmark
 
 Documented per AGENTS.md §1.6:
 
+- **The Node relay is about 400 lines, not 50.** Issue #2 pictured a ~50-line relay on a WebSocket library. Writing the WebSocket server by hand keeps it dependency-free, and moving the rules into a shared core (`src/room.js`) means self-hosting can't weaken them.
+- **Cloudflare, not Netlify, for the relay.** Netlify functions can't hold WebSockets. Cloudflare is already a BFW vendor (bf-brain), and FEATURE-SPEC §7 settles it. `wrangler` is the relay package's only dependency, and it's a dev dependency.
 - **Vanilla JS with no framework, no build and no Eddie runtime dependency** in the packages. They run inside other people's pages, so they carry nothing those pages didn't ask for. The lab's own UI (the demo pages here, and later the remote and the extension popup) is built from Eddie.
 - **Our own bundler instead of a third-party one.** `tools/bundle.js` covers the handful of import/export forms these packages use and refuses the rest, which kept the build free of dependencies. If the packages ever need syntax it refuses, adopting esbuild (pinned) is the move, not stretching the bundler.
 - **Google Fonts.** AGENTS.md §2.2 forbids Google Fonts links. The applier's planned font sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)) will request from `fonts.googleapis.com` / `fonts.gstatic.com`, but only in an activated preview session. Brad decided this in FEATURE-SPEC §10 Q3. It's preview-only by construction, and nobody should copy the pattern into a shipping product.

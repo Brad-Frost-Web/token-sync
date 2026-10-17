@@ -100,11 +100,18 @@ export function createRoomState() {
   }
 
   /**
-   * The messages that bring a late joiner up to date, already stamped with the
+   * The messages that bring a joiner up to date, already stamped with the
    * times this state learned them. Nothing, if this state has seen nothing.
+   *
+   * "A joiner" includes a peer that dropped off and is rejoining with stale
+   * state — so the snapshot also carries the last reset and the lock state
+   * (unlocked included). Without them, a display that missed a reset or an
+   * unlock while it was away would keep the cleared tokens and stay locked.
    */
   function snapshotMessages(room) {
-    // One message per distinct write time, so every key keeps the timestamp
+    const messages = [];
+    if (resetTs > -Infinity) messages.push({ ...createMessage({ room, op: 'reset', from: 'presenter' }), ts: resetTs });
+    // One snapshot per distinct write time, so every key keeps the timestamp
     // it was really written at. Promoting an old key to a newer ts would let
     // it beat a write the joiner made a moment after joining.
     const byTs = new Map();
@@ -112,18 +119,22 @@ export function createRoomState() {
       if (!byTs.has(entry.ts)) byTs.set(entry.ts, {});
       byTs.get(entry.ts)[key] = entry.value;
     }
-    const messages = [...byTs]
-      .sort(([a], [b]) => a - b)
-      .map(([ts, group]) => ({ ...createMessage({ room, op: 'snapshot', from: 'source', props: group }), ts }));
-    if (lock.locked) messages.push({ ...createMessage({ room, op: 'lock', from: 'presenter' }), ts: lock.ts });
+    for (const [ts, group] of [...byTs].sort(([a], [b]) => a - b)) {
+      messages.push({ ...createMessage({ room, op: 'snapshot', from: 'source', props: group }), ts });
+    }
+    if (lock.ts > -Infinity) messages.push({ ...createMessage({ room, op: lock.locked ? 'lock' : 'unlock', from: 'presenter' }), ts: lock.ts });
 
     return messages;
   }
+
+  /** How many keys the room holds. */
+  const size = () => entries.size;
 
   return {
     apply,
     props,
     snapshotMessages,
+    size,
     get locked() {
       return lock.locked;
     },
