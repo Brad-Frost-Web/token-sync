@@ -1,0 +1,8 @@
+{
+  "name": "@brad-frost-web/token-sync-script",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The ?token-sync=<room> drop-in: one script tag, inert unless the URL asks for a room.",
+  "type": "module",
+  "license": "MIT"
+}

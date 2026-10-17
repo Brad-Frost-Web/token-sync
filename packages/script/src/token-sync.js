@@ -1,0 +1,102 @@
+// The ?token-sync=<room> drop-in.
+//
+//   <script type="module" src=".../token-sync.js"></script>
+//
+// Does nothing on an ordinary page view. Visit the page with
+// ?token-sync=<room> and it joins that room and applies the room's tokens to
+// this tab — and keeps doing so for the rest of the tab's session, so you can
+// click around the site. ?token-sync=off leaves.
+//
+// Preview only: it changes this tab's custom properties and nothing else.
+// Real visitors never carry the parameter, so they never see a change.
+
+import { connect, createApplier } from '../../client/src/index.js';
+import { isRoom } from '../../protocol/src/index.js';
+
+export const PARAM = 'token-sync';
+export const STORAGE_KEY = 'token-sync:room';
+
+/**
+ * Which room, if any, this tab should be in. The URL wins; otherwise the room
+ * this tab joined earlier in its session.
+ * @param {{ search: string, storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> }} context
+ * @returns {string | null}
+ */
+export function resolveRoom({ search, storage }) {
+  const fromUrl = new URLSearchParams(search).get(PARAM);
+  try {
+    if (fromUrl === 'off') {
+      storage?.removeItem(STORAGE_KEY);
+
+      return null;
+    }
+    if (fromUrl !== null) {
+      if (!isRoom(fromUrl)) return null;
+      storage?.setItem(STORAGE_KEY, fromUrl);
+
+      return fromUrl;
+    }
+    const remembered = storage?.getItem(STORAGE_KEY) ?? null;
+
+    return remembered && isRoom(remembered) ? remembered : null;
+  } catch {
+    // Storage can throw (privacy modes, sandboxed frames). Fall back to the URL alone.
+    return fromUrl && fromUrl !== 'off' && isRoom(fromUrl) ? fromUrl : null;
+  }
+}
+
+/**
+ * Join the room named by the URL or the session, and apply it to this page.
+ * @param {{ location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object }} [context]
+ */
+export function start({
+  location = globalThis.location,
+  storage = safeSessionStorage(),
+  document = globalThis.document,
+  transport = 'broadcast',
+} = {}) {
+  const room = resolveRoom({ search: location?.search ?? '', storage });
+  if (!room || !document) return null;
+
+  // The newest message folded in. A `set` is a live change, so its age when it
+  // lands is the delivery time; a `snapshot` is a late joiner catching up, and
+  // its age is just how long ago that write happened.
+  let newest = { ts: 0, op: 'set' };
+  const emit = (type, detail) => document.dispatchEvent(new CustomEvent(type, { detail: { room, ...detail } }));
+  const applier = createApplier({
+    root: document.documentElement,
+    // Read after onChange below has recorded the newest message, whichever
+    // order the two arrive in — so a damped change reports its real delay.
+    onApply: ({ changed, at }) =>
+      queueMicrotask(() =>
+        emit('token-sync:apply', { changed, op: newest.op, latencyMs: newest.op === 'snapshot' ? null : at - newest.ts }),
+      ),
+    onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
+  });
+  const session = connect({
+    room,
+    transport,
+    role: 'controller',
+    applier,
+    onChange: ({ message }) => {
+      if (message.ts >= newest.ts) newest = { ts: message.ts, op: message.op };
+    },
+    onError: ({ errors }) => console.warn(`token-sync: dropped a message — ${errors.join('; ')}`),
+  });
+  document.documentElement.dataset.tokenSync = room;
+  console.info(`token-sync: previewing room "${room}" in this tab. Add ?${PARAM}=off to the URL to leave.`);
+
+  return session;
+}
+
+function safeSessionStorage() {
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  globalThis.tokenSync = start();
+}
