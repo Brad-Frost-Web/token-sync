@@ -22,14 +22,14 @@ const SHEET = `
 test('reads every custom property with the selector it sits under', () => {
   const decls = readCustomProperties(SHEET);
   assert.deepEqual(
-    decls.map((d) => [d.name, d.value, d.selector]),
+    decls.map((d) => [d.name, d.value, d.selector, d.conditional]),
     [
-      ['--ed-color-brand', '#be6700', ':root'],
-      ['--ed-radius', '4px', ':root'],
-      ['--ed-font', '"Inter", sans-serif', ':root'],
-      ['--ed-color-brand', '#ffb36b', '.bfw-dark'],
-      ['--ed-gap', '1.5rem', ':root'],
-      ['--after-string', '2px', '.semi'],
+      ['--ed-color-brand', '#be6700', ':root', false],
+      ['--ed-radius', '4px', ':root', false],
+      ['--ed-font', '"Inter", sans-serif', ':root', false],
+      ['--ed-color-brand', '#ffb36b', '.bfw-dark', false],
+      ['--ed-gap', '1.5rem', ':root', true],
+      ['--after-string', '2px', '.semi', false],
     ],
   );
 });
@@ -41,7 +41,21 @@ test('a semicolon or brace inside a string does not end a declaration', () => {
 test('the last declaration wins, and --selector narrows to one block', () => {
   assert.equal(tokensFrom(SHEET)['--ed-color-brand'], '#ffb36b');
   assert.equal(tokensFrom(SHEET, { selector: ':root' })['--ed-color-brand'], '#be6700');
-  assert.equal(tokensFrom(SHEET, { selector: ':root' })['--ed-gap'], '1.5rem');
+});
+
+test('a breakpoint\'s value never replaces the base value', () => {
+  assert.equal(tokensFrom(':root { --gap: 1rem } @media (min-width: 40em) { :root { --gap: 2rem } }')['--gap'], '1rem');
+  assert.equal(tokensFrom('@supports (display: grid) { :root { --x: 1px } }')['--x'], undefined);
+  assert.equal(tokensFrom('@layer base { :root { --x: 1px } }')['--x'], '1px'); // @layer always applies
+});
+
+test('!important is the priority, not part of the value', () => {
+  assert.deepEqual(tokensFrom(':root { --a: red !important; --b: 1px ! IMPORTANT }'), { '--a': 'red', '--b': '1px' });
+});
+
+test('--selector matches a block whose selector list includes it', () => {
+  assert.equal(tokensFrom(':root, .bfw { --a: 1px }', { selector: ':root' })['--a'], '1px');
+  assert.equal(tokensFrom('.bfw-dark { --a: 1px }', { selector: ':root' })['--a'], undefined);
 });
 
 test('diff reports what changed and what disappeared', () => {

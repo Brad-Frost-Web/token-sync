@@ -5,12 +5,15 @@
 // which is all a token file needs. Values are not judged here; the protocol's
 // checks refuse what they refuse before anything is sent.
 
+/** At-rules whose blocks only apply sometimes. Their declarations are left out by default. */
+const CONDITIONAL = /^@(media|supports|container|document)\b/i;
+
 /**
  * Every custom property declaration, in order, with the selector of the
- * block it sits in (nested blocks such as @media report their innermost
- * selector).
+ * block it sits in and whether it sits inside a conditional at-rule
+ * (@media, @supports, @container).
  * @param {string} css
- * @returns {{ name: string, value: string, selector: string }[]}
+ * @returns {{ name: string, value: string, selector: string, conditional: boolean }[]}
  */
 export function readCustomProperties(css) {
   const out = [];
@@ -35,7 +38,7 @@ export function readCustomProperties(css) {
       stack.push(buffer.trim());
       buffer = '';
     } else if (ch === '}' || ch === ';') {
-      declare(buffer, stack.at(-1) ?? '', out);
+      declare(buffer, stack.at(-1) ?? '', stack.some((prelude) => CONDITIONAL.test(prelude)), out);
       buffer = '';
       if (ch === '}') stack.pop();
     } else {
@@ -47,15 +50,20 @@ export function readCustomProperties(css) {
   return out;
 }
 
-function declare(text, selector, out) {
+function declare(text, selector, conditional, out) {
   const match = /^\s*(--[A-Za-z0-9_-]+)\s*:([\s\S]*)$/.exec(text);
   if (!match || !selector) return;
-  out.push({ name: match[1], value: match[2].trim().replace(/\s+/g, ' '), selector });
+  // `!important` is the declaration's priority, not part of the token's value.
+  const value = match[2].trim().replace(/\s+/g, ' ').replace(/\s*!\s*important$/i, '');
+  out.push({ name: match[1], value, selector, conditional });
 }
 
 /**
- * The custom properties a stylesheet ends up defining, last declaration
- * winning, optionally only those under one selector (`:root`, `.bfw`).
+ * The custom properties a stylesheet always defines, last declaration
+ * winning. Declarations inside @media, @supports or @container are left out:
+ * one value is sent to every page, so a breakpoint's value must not replace
+ * the base one. `selector` keeps only blocks whose selector list includes it
+ * (`:root` matches `:root, .bfw`).
  * @param {string} css
  * @param {{ selector?: string }} [options]
  * @returns {Record<string, string>}
@@ -63,7 +71,8 @@ function declare(text, selector, out) {
 export function tokensFrom(css, { selector } = {}) {
   const tokens = {};
   for (const decl of readCustomProperties(css)) {
-    if (selector !== undefined && decl.selector !== selector) continue;
+    if (decl.conditional) continue;
+    if (selector !== undefined && !decl.selector.split(',').map((s) => s.trim()).includes(selector)) continue;
     tokens[decl.name] = decl.value;
   }
 

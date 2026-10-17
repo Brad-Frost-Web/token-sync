@@ -125,3 +125,29 @@ test('with no --room, watch creates one and prints its presenter key', async (t)
   await until(() => run.output().includes('presenter key'));
   assert.match(run.output(), /created room "[a-z2-9]{6}"/);
 });
+
+test('a stylesheet the size of Eddie\'s arrives in full, split into frames the relay takes', async (t) => {
+  const { room, http } = await relayWithRoom(t);
+  const dir = tempDir(t);
+  const css = join(dir, 'tokens.css');
+  const decls = Array.from({ length: 700 }, (_, i) => `--ed-theme-color-background-default-${i}: #ffffff;`).join('\n');
+  writeFileSync(css, `:root {\n${decls}\n}`);
+  const page = await watcher(t, http, room);
+  const run = cli(t, ['watch', css, '--send-initial', '--relay', http, '--room', room]);
+  await until(() => Object.keys(page.props()).length === 700, 15000);
+  assert.doesNotMatch(run.output(), /frames may be at most/);
+});
+
+test('a room that does not exist fails clearly instead of hanging', async (t) => {
+  const { http } = await relayWithRoom(t);
+  const dir = tempDir(t);
+  const css = join(dir, 'tokens.css');
+  writeFileSync(css, ':root { --a: 1px; }');
+  const child = spawn(process.execPath, [BIN, 'watch', css, '--relay', http, '--room', 'nope'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => child.kill());
+  let output = '';
+  child.stderr.on('data', (d) => (output += d));
+  const code = await new Promise((resolve) => child.on('exit', resolve));
+  assert.equal(code, 1);
+  assert.match(output, /couldn't join room "nope"/);
+});
