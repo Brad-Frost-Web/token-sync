@@ -64,6 +64,9 @@ export function createWipe({ document = globalThis.document, matchMedia = global
     try {
       const transition = document.startViewTransition(update);
       transition.finished.then(done, done);
+      // A skipped transition (a hidden tab, a newer one starting) rejects
+      // `ready`; that's expected, not an error worth logging.
+      transition.ready?.catch?.(() => {});
     } catch {
       done();
       update();

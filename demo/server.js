@@ -12,8 +12,9 @@ import { bookmarkletUrl } from '../packages/bookmarklet/build.js';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 4321);
-// Only these trees are served. Nothing else in the repo is reachable.
-const SERVED = [`demo${sep}`, `packages${sep}`];
+// Only these trees are served. Nothing else in the repo is reachable. (Eddie's
+// contract module is served so the unbundled drop-in can import it.)
+const SERVED = [`demo${sep}`, `packages${sep}`, ['node_modules', '@brad-frost-web', 'eddie-design-tokens', 'contract', ''].join(sep)];
 const escapeAttribute = (value) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
