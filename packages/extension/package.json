@@ -1,0 +1,8 @@
+{
+  "name": "@brad-frost-web/token-sync-extension",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MV3 applier extension for Chromium and Firefox.",
+  "type": "module",
+  "license": "MIT"
+}
