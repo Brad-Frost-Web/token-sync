@@ -91,13 +91,13 @@ The demo's latency readout subtracts the relay's timestamp from the viewer's clo
 ## From your token files: the CLI
 
 ```bash
-npx --no token-sync relay                                  # a local relay, if you don't have one
-npx --no token-sync watch dist/tokens.css                  # send what changes in a built stylesheet
-npx --no token-sync watch dist/tokens.css --build "npm run tokens" --src tokens/
-npx --no token-sync poll https://codepen.io/…/pen.css      # follow a stylesheet you can't build
+npm run token-sync -- relay                                # a local relay, if you don't have one
+npm run token-sync -- watch dist/tokens.css                # send what changes in a built stylesheet
+npm run token-sync -- watch dist/tokens.css --build "npm run tokens" --src tokens/
+npm run token-sync -- poll https://codepen.io/…/pen.css    # follow a stylesheet you can't build
 ```
 
-(`npx --no` runs the copy in this repo's workspace. From the root, `node packages/cli/bin/token-sync.js` works too.)
+Run these from this repo, or call `node packages/cli/bin/token-sync.js` directly. Publishing it as an installable `token-sync` command is a later, separate decision.
 
 - **`watch`** reads the custom properties in a built stylesheet. On every save it sends only the ones that changed. With `--build` and `--src`, saving a file under the source folder runs your own build first, whether that's Style Dictionary or anything else that writes the stylesheet. Token Sync doesn't depend on Style Dictionary.
 - **`poll`** does the same for a stylesheet at a URL, every `--interval` milliseconds (2000 by default): a CodePen, or a deploy preview.
