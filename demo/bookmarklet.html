@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- eddie-template: ed-p-article — a short instructional page: a page header and two titled sections of prose -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync — bookmarklet</title>
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/core/css/base.css" />
+    <script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Token Sync bookmarklet</h1></ed-heading>
+              Preview a room’s tokens on any page, without adding a script to the site.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Install and use</ed-heading>
+              <ed-text-passage>
+                <ol>
+                  <li>
+                    Drag this link to your bookmarks bar: <a href="{{BOOKMARKLET_URL}}">Token Sync</a>. Without dragging, open the
+                    link’s context menu (right-click, or the menu key with the link focused) and choose to bookmark it.
+                  </li>
+                  <li>On the page you want to preview, select the bookmark and type a room code.</li>
+                  <li>To leave, select it again and type <code>off</code>.</li>
+                </ol>
+              </ed-text-passage>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">What it can’t do</ed-heading>
+              <ed-text-passage>
+                <ul>
+                  <li>It only reaches the page you select it on. Following a link loads a new page without it, unless that site carries the drop-in script.</li>
+                  <li>A site with a strict Content Security Policy can block it. The browser extension (<a href="https://github.com/Brad-Frost-Web/token-sync/issues/4">#4</a>) will be the way around that.</li>
+                  <li>Rooms are local to this browser until the relay ships: open the source page in another tab of the same browser.</li>
+                </ul>
+              </ed-text-passage>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+  </body>
+</html>
