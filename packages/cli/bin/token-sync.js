@@ -272,8 +272,6 @@ async function watchCommand(options) {
   const session = await joinRoom(options);
   const follow = follower(session, read, file);
   await follow.start(options['send-initial']).catch((error) => fail(`couldn't read ${file}: ${error.message}`));
-  log(`watching ${file}${build ? ` (building with "${build}" when ${sources.join(', ')} change)` : ''}`);
-
   const update = serial(() => follow.update());
   // Editors replace files rather than writing them in place, so watch the folder.
   watch(targetDir, debounce(update, 100)).on('error', (error) => log(error.message));
@@ -290,6 +288,8 @@ async function watchCommand(options) {
       }).on('error', (error) => log(error.message));
     }
   }
+  // Said only once the watchers are attached, so a save right after this line is never missed.
+  log(`watching ${file}${build ? ` (building with "${build}" when ${sources.join(', ')} change)` : ''}`);
 }
 
 async function pollCommand(options) {

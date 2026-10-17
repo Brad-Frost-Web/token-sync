@@ -1,8 +1,12 @@
 {
   "name": "@brad-frost-web/token-sync-extension",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
-  "description": "MV3 applier extension for Chromium and Firefox.",
+  "description": "MV3 applier extension for Chromium and Firefox. npm run build:extension writes dist/extension/ to load unpacked.",
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@brad-frost-web/eddie-design-tokens": "0.70.0",
+    "@brad-frost-web/eddie-web-components": "0.70.0"
+  }
 }

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Token Sync",
+  "version": "0.0.1",
+  "description": "Preview a room's design tokens on the open tab, live. Only the tab you choose, only on sites you allow.",
+  "action": { "default_popup": "popup.html", "default_title": "Token Sync" },
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "permissions": ["storage", "scripting", "activeTab"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "browser_specific_settings": { "gecko": { "id": "token-sync@bradfrost.com", "strict_min_version": "128.0" } }
+}
