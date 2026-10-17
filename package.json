@@ -17,7 +17,9 @@
     "bfw:ship": "bfw-process verify-phase ship",
     "bfw:verify:tests": "npm test",
     "relay:worker": "npm exec --no -w packages/relay -- wrangler dev --port 8788 --ip 127.0.0.1",
-    "relay:worker:test": "TOKEN_SYNC_RELAY_URL=http://127.0.0.1:8788 node --test packages/relay/test/node-server.test.js"
+    "relay:worker:test": "TOKEN_SYNC_RELAY_URL=http://127.0.0.1:8788 node --test packages/relay/test/node-server.test.js",
+    "build:extension": "node packages/extension/build.js",
+    "extension:smoke": "node packages/extension/smoke.js"
   },
   "devDependencies": {
     "@brad-frost-web/bfw-process": "0.25.0"
