@@ -7,7 +7,7 @@
 // Injected again after each navigation; a second injection into the same
 // page is a no-op.
 
-import { connect, createApplier, createWipe, holdToCompare } from '../../client/src/index.js';
+import { connect, createApplier, createFontLoader, createWipe, holdToCompare } from '../../client/src/index.js';
 import { createNotifier, lazyEddieAdapter } from '../../script/src/eddie.js';
 import { PORT_NAME } from './constants.js';
 
@@ -28,8 +28,14 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
   // On an Eddie page, Eddie's contract: knobs expand and stay legible, and
   // what was nudged shows on the page (the same as token-sync-eddie.js).
   const readComputed = (name) => globalThis.getComputedStyle?.(document.documentElement)?.getPropertyValue(name) ?? '';
+  // Google Fonts for a font-family token this page doesn't have (spec §10 Q3),
+  // only what was applied, gone when the tab leaves the room.
+  const fonts = createFontLoader({ document });
   const applier = createApplier({
     root: document.documentElement,
+    onApply: ({ changed }) => {
+      for (const name of changed) if (/font-family/.test(name)) fonts.ensure(document.documentElement.style.getPropertyValue(name));
+    },
     resolve: lazyEddieAdapter({ readComputed }).resolve,
     onResolved: createNotifier(document),
     transition: (update, { cause }) => (cause === 'hold' ? wipe(update) : update()),
@@ -42,6 +48,7 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
     stopComparing();
     session?.close();
     session = null;
+    fonts.remove();
     delete document.documentElement.dataset.tokenSync;
     globalThis.tokenSyncExtension = null;
   }
