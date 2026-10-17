@@ -61,7 +61,7 @@ Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **
 - **One tab at a time.** Previewing another tab stops the first, and its page goes back to how it was.
 - **Only sites you allow.** The first preview on a site asks the browser for permission for that one site (no blanket "all sites" grant). The site joins the room's allowed list, and as the tab moves between allowed sites the room comes back on every page. The popup lists the allowed sites, and removing one also gives back its permission.
 - **The background holds the relay connection**, so a page's Content Security Policy can't block it. The synced page sends a heartbeat that keeps the background awake. If the browser stops the background anyway, the page reconnects, and the restarted background replays the room. The page runs only the applier, with the same guardrails as the drop-in, including hold <kbd>\</kbd> to compare.
-- **On Eddie pages it brings Eddie's contract**, as the Eddie drop-in does: `contract:` knobs expand and stay legible, and what was nudged shows on the page.
+- **On Eddie pages it brings Eddie's contract**, as the Eddie drop-in does: `contract:` knobs expand and stay legible, and what was nudged shows in the page's own `ed-toast` when the page defines one (the content script runs in an isolated world and can't register components; otherwise it goes to the console). The content script carries the adapter, about 118 KB, on every allowed site.
 - **The popup is built from Eddie**, bundled in from the pinned packages, because MV3 forbids remote code.
 
 `npm run extension:smoke` loads the built extension into real Chrome over the DevTools protocol. It checks that the extension loads, its service worker starts, and the popup renders Eddie.

@@ -41,10 +41,20 @@ export function createNotifier(document, { setTimeout: later = setTimeout, clear
 
   function show(lines, lasting) {
     for (const line of lines) console.info(`token-sync: ${line}`);
-    if (!globalThis.customElements?.get?.('ed-toast') || !document.body) return;
+    if (!document.body) return;
     if (!toast) {
       toast = document.createElement('ed-toast');
       document.body.append(toast);
+      // Whether the page defines ed-toast is read from the element, not from
+      // window.customElements: an extension's content script runs in an
+      // isolated world whose customElements is null, while the element it
+      // creates in the shared DOM still upgrades with the page's definition.
+      if (!toast.matches?.(':defined')) {
+        toast.remove();
+        toast = null;
+
+        return;
+      }
     }
     // ed-toast wraps its slot in a text passage itself: slot plain paragraphs.
     toast.replaceChildren(...lines.map((line) => Object.assign(document.createElement('p'), { textContent: line })));
