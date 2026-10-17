@@ -95,3 +95,28 @@ test('injecting twice into one page starts it once', (t) => {
   const first = startContent(page);
   assert.equal(startContent(page), first);
 });
+
+test('on an Eddie page, the extension expands contract knobs like the Eddie drop-in', (t) => {
+  const theme = { '--ed-theme-color-background-default': '#fbfaf5', '--ed-theme-color-background-brand': '#9e5600', '--ed-theme-color-content-default': '#110000' };
+  const page = fakePage();
+  globalThis.getComputedStyle = () => ({ getPropertyValue: (name) => page.props.get(name) ?? theme[name] ?? '' });
+  t.after(() => {
+    delete globalThis.getComputedStyle;
+    globalThis.tokenSyncExtension?.leave();
+  });
+  const info = console.info;
+  console.info = () => {};
+  t.after(() => (console.info = info));
+  startContent(page);
+  page.send({ kind: 'config', room: 'detach' });
+  page.send({ kind: 'msg', msg: { v: 1, room: 'detach', op: 'set', from: 'controller', props: { 'contract:color.background-brand': '#1b4dd8' }, ts: 1 } });
+  assert.equal(page.props.get('--ed-theme-color-background-brand'), '#1b4dd8');
+  assert.equal(page.props.get('--ed-theme-button-primary-color-background-default'), '#1b4dd8');
+});
+
+test('the built content script carries no drop-in autostart', async () => {
+  const { bundle } = await import('../../../tools/bundle.js');
+  const { fileURLToPath } = await import('node:url');
+  const built = bundle(fileURLToPath(new URL('../src/content-entry.js', import.meta.url)));
+  assert.doesNotMatch(built, /TOKEN_SYNC_MANUAL_START|DOMContentLoaded/);
+});
