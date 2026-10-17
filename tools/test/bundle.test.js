@@ -201,3 +201,21 @@ test('the bundled bookmarklet carries the guardrails: refusals and damping', asy
   assert.equal(writes.some(([n]) => n === '--bg'), false);
   assert.ok(writes.length <= 2, `a burst of 10 within 100 ms made ${writes.length} writes`);
 });
+
+test('backticks in a comment are prose, not the start of a template literal', (t) => {
+  const dir = fixture(t, {
+    'a.js': "/**\n * The default, `\\`, is rarely bound.\n */\nexport const A = 1;\n// one more `\nexport function b() {\n  return 2;\n}\n",
+  });
+  const out = vm.runInNewContext(bundle(join(dir, 'a.js')));
+  assert.equal(out.A, 1);
+  assert.equal(out.b(), 2);
+});
+
+test('a comment followed by code that opens a template literal still opens it', (t) => {
+  const dir = fixture(t, { 'a.js': "/* note */ export const css = `\nexport const not = 1;\n// kept\n`;\nexport const after = 2;\n" });
+  for (const stripComments of [false, true]) {
+    const out = vm.runInNewContext(bundle(join(dir, 'a.js'), { stripComments }));
+    assert.equal(out.css, '\nexport const not = 1;\n// kept\n');
+    assert.equal(out.after, 2);
+  }
+});

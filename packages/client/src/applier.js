@@ -27,7 +27,11 @@ const CONTRACT_PREFIX = 'contract:';
  *   timers?: { now(): number, setTimeout(fn: () => void, ms: number): unknown, clearTimeout(id: unknown): void },
  *   onApply?: (info: { changed: string[], at: number }) => void,
  *   onRefuse?: (info: { name: string, value: string, reason: string }) => void,
- * }} [options]
+ *   transition?: (update: () => void, info: { cause: 'render' | 'hold' }) => void,
+ * }} [options] `transition` wraps each batch of writes, e.g. in a View
+ *   Transition (see wipe.js). It must call `update` exactly once, now or
+ *   later; the writes are worked out when `update` runs, so a late callback
+ *   writes the newest state, and one that runs after destroy() writes nothing.
  */
 export function createApplier({
   root = globalThis.document?.documentElement,
@@ -40,6 +44,7 @@ export function createApplier({
   },
   onApply = () => {},
   onRefuse = () => {},
+  transition = (update) => update(),
 } = {}) {
   if (!root?.style) throw new Error('token-sync: the applier needs an element to apply to');
   // A hair over 1000 / max, so a timer firing a millisecond early can never
@@ -54,6 +59,11 @@ export function createApplier({
   const types = new Map();
 
   let desired = {};
+  /** While held, the page shows its own values: "before", for comparing. */
+  let held = false;
+  /** What asked for the next flush: a room change, or the compare key. */
+  let cause = 'render';
+  let alive = true;
   /** `name value` pairs already reported, so a refusal warns once, not on every message. */
   const reported = new Set();
   let lastFlush = -Infinity;
@@ -65,33 +75,60 @@ export function createApplier({
     return types.get(name);
   }
 
-  function flush() {
-    timer = null;
-    const now = timers.now();
-    const changed = [];
-
-    for (const [name, value] of Object.entries(desired)) {
+  /**
+   * Work out the writes that make the page show `target`, record them as
+   * applied, and return them. Nothing touches the page yet.
+   */
+  function plan(target) {
+    const writes = [];
+    for (const [name, value] of Object.entries(target)) {
       if (applied.get(name) === value) continue;
       if (!originalInline.has(name)) originalInline.set(name, root.style.getPropertyValue(name));
-      root.style.setProperty(name, value);
+      writes.push([name, value]);
       applied.set(name, value);
-      changed.push(name);
     }
     for (const name of [...applied.keys()]) {
-      if (name in desired) continue;
-      const original = originalInline.get(name) ?? '';
-      if (original) root.style.setProperty(name, original);
-      else root.style.removeProperty(name);
+      if (name in target) continue;
+      writes.push([name, originalInline.get(name) ?? '']);
       applied.delete(name);
-      changed.push(name);
     }
+
+    return writes;
+  }
+
+  function write(writes) {
+    for (const [name, value] of writes) {
+      if (value) root.style.setProperty(name, value);
+      else root.style.removeProperty(name);
+    }
+  }
+
+  /** Would flushing now change anything on screen? */
+  function pending() {
+    const target = held ? {} : desired;
+
+    return Object.entries(target).some(([name, value]) => applied.get(name) !== value) || [...applied.keys()].some((name) => !(name in target));
+  }
+
+  function flush() {
+    timer = null;
     // Only a visible change opens a new damping window. A lock, a repeat of
     // the current value, or a refused value changes nothing on screen, and
     // must not delay the next real edit.
-    if (changed.length) {
-      lastFlush = now;
-      onApply({ changed, at: now });
-    }
+    if (!pending()) return;
+    lastFlush = timers.now();
+    const info = { cause };
+    cause = 'render';
+    transition(() => {
+      // Planned here, not before: a View Transition runs this a frame or
+      // more later, and by then the state may have moved on or the tab may
+      // have left the room.
+      if (!alive) return;
+      const writes = plan(held ? {} : desired);
+      if (!writes.length) return;
+      write(writes);
+      onApply({ changed: writes.map(([name]) => name), at: timers.now(), cause: info.cause });
+    }, info);
   }
 
   function schedule() {
@@ -124,8 +161,9 @@ export function createApplier({
             reported.add(`${name} ${value}`);
             onRefuse({ name, value, reason: check.reason });
           }
-          // Keep the last good value on screen rather than snapping back.
-          if (applied.has(name)) next[name] = applied.get(name);
+          // Keep the last good value rather than snapping back — taken from
+          // the state, not the page, which is empty while held.
+          if (name in desired) next[name] = desired[name];
           continue;
         }
         next[name] = value;
@@ -140,8 +178,22 @@ export function createApplier({
      */
     destroy() {
       if (timer !== null) timers.clearTimeout(timer);
+      timer = null;
+      alive = false;
       desired = {};
-      flush();
+      write(plan({}));
+    },
+    /**
+     * Hold the page on its own values ("before") while `on`, then let go back
+     * to the room's state ("after"). The room's state is kept throughout.
+     * Changes still go through damping, so tapping the key can't flash.
+     * @param {boolean} on
+     */
+    hold(on) {
+      if (held === Boolean(on)) return;
+      held = Boolean(on);
+      cause = 'hold';
+      schedule();
     },
   };
 }
