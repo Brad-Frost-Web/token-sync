@@ -1,10 +1,10 @@
 // What the bookmarklet runs, once bundled into a javascript: URL.
 //
-// Asks for a room code and joins it in this tab. "off" leaves. The bundle sets
-// TOKEN_SYNC_MANUAL_START first, so the drop-in's own URL-driven autostart
-// stays out of the way and this prompt is the only way in.
+// Asks for a room code and joins it in this tab. "off" leaves. It bundles the
+// drop-in's core, which has no autostart (this prompt is the only way in) and
+// no Eddie adapter (to keep the bookmarklet's URL short).
 
-import { start, STORAGE_KEY } from '../../script/src/token-sync.js';
+import { start, STORAGE_KEY } from '../../script/src/core.js';
 
 export function run({ prompt = globalThis.prompt, storage = globalThis.sessionStorage } = {}) {
   let current = '';

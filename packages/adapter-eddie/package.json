@@ -1,0 +1,11 @@
+{
+  "name": "@brad-frost-web/token-sync-adapter-eddie",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Eddie's theme contract as a Token Sync adapter: expand contract:<path> knobs, keep every pair legible, and say what was nudged.",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@brad-frost-web/eddie-design-tokens": "0.70.0"
+  }
+}

@@ -28,10 +28,14 @@ const CONTRACT_PREFIX = 'contract:';
  *   onApply?: (info: { changed: string[], at: number }) => void,
  *   onRefuse?: (info: { name: string, value: string, reason: string }) => void,
  *   transition?: (update: () => void, info: { cause: 'render' | 'hold' }) => void,
+ *   resolve?: (props: Record<string, string>) => { props: Record<string, string>, notices?: string[], refused?: { name: string, value: string, reason: string }[] },
+ *   onNotice?: (message: string) => void,
  * }} [options] `transition` wraps each batch of writes, e.g. in a View
  *   Transition (see wipe.js). It must call `update` exactly once, now or
  *   later; the writes are worked out when `update` runs, so a late callback
  *   writes the newest state, and one that runs after destroy() writes nothing.
+ *   `resolve` is a design system's adapter (adapter-eddie): it turns the
+ *   room's props into the custom properties to apply, before any check runs.
  */
 export function createApplier({
   root = globalThis.document?.documentElement,
@@ -45,6 +49,8 @@ export function createApplier({
   onApply = () => {},
   onRefuse = () => {},
   transition = (update) => update(),
+  resolve = null,
+  onNotice = () => {},
 } = {}) {
   if (!root?.style) throw new Error('token-sync: the applier needs an element to apply to');
   // A hair over 1000 / max, so a timer firing a millisecond early can never
@@ -145,7 +151,19 @@ export function createApplier({
      * its last good value.
      * @param {Record<string, string>} props
      */
-    render(props) {
+    render(roomProps) {
+      let props = roomProps;
+      if (resolve) {
+        const resolved = resolve(roomProps);
+        props = resolved.props;
+        for (const message of resolved.notices ?? []) onNotice(message);
+        for (const refusal of resolved.refused ?? []) {
+          if (!reported.has(`${refusal.name} ${refusal.value}`)) {
+            reported.add(`${refusal.name} ${refusal.value}`);
+            onRefuse(refusal);
+          }
+        }
+      }
       const next = {};
       for (const [name, value] of Object.entries(props)) {
         if (name.startsWith(CONTRACT_PREFIX)) {

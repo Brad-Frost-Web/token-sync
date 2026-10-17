@@ -21,9 +21,7 @@ export function bookmarkletSource() {
   const expression = bundle(BOOKMARKLET_ENTRY, { stripComments: true }).trim().replace(/;$/, '');
 
   // void(): a javascript: URL whose result is a string replaces the page.
-  // TOKEN_SYNC_MANUAL_START keeps the bundled drop-in's own autostart quiet
-  // while the bundle evaluates, then goes, so a drop-in loaded later behaves normally.
-  return `void((()=>{globalThis.TOKEN_SYNC_MANUAL_START=true;const m=(${expression});delete globalThis.TOKEN_SYNC_MANUAL_START;m.run();})())`;
+  return `void((${expression}).run())`;
 }
 
 export function bookmarkletUrl() {

@@ -9,6 +9,7 @@
 //   import { a, b as c } from './x.js';
 //   export function f() {}      export const X = …;
 //   export { a, b } from './x.js';
+//   export { a, b as c };       (names already in scope)
 //   export * from './x.js';
 //
 // Anything else — default exports, namespace imports, dynamic import(),
@@ -24,6 +25,7 @@ export const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const IMPORT = /^import\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"];?\s*$/;
 const EXPORT_FROM = /^export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"];?\s*$/;
 const EXPORT_STAR = /^export\s*\*\s*from\s*['"]([^'"]+)['"];?\s*$/;
+const EXPORT_LOCAL = /^export\s*\{([^}]*)\}\s*;?\s*$/;
 const EXPORT_DECL = /^export\s+(?:async\s+)?(function\*?|const|class)\s+([A-Za-z_$][\w$]*)/;
 
 /**
@@ -102,6 +104,7 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
     const exportNames = [];
     const reexports = [];
     const stars = [];
+    const localExports = [];
     let inTemplate = false;
     const lines = source.split('\n').map((original, index) => {
       const where = `${relative(REPO_ROOT, file)}:${index + 1}`;
@@ -137,6 +140,11 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
 
         return '';
       }
+      if ((m = EXPORT_LOCAL.exec(trimmed))) {
+        for (const [local, exported] of specifiers(m[1])) localExports.push({ local, exported });
+
+        return '';
+      }
       if ((m = EXPORT_STAR.exec(trimmed))) {
         const dep = local(m[1]);
         deps.push(dep);
@@ -162,7 +170,7 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
 
     for (const dep of deps) load(dep);
     visiting.delete(file);
-    modules.set(file, { lines, exportNames, reexports, stars, imports });
+    modules.set(file, { lines, exportNames, reexports, stars, imports, localExports });
     order.push(file);
   }
 
@@ -171,9 +179,9 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
   // Every imported name must be exported by its module, as a real module
   // loader would insist — a typo must fail the build, not become undefined.
   const exportsOf = (file) => {
-    const { exportNames, reexports, stars } = modules.get(file);
+    const { exportNames, reexports, stars, localExports } = modules.get(file);
 
-    return new Set([...exportNames, ...reexports.map((r) => r.local), ...stars.flatMap((dep) => [...exportsOf(dep)])]);
+    return new Set([...exportNames, ...reexports.map((r) => r.local), ...localExports.map((e) => e.exported), ...stars.flatMap((dep) => [...exportsOf(dep)])]);
   };
   for (const file of order) {
     for (const { dep, imported, where } of modules.get(file).imports) {
@@ -183,8 +191,9 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
 
   const parts = ['(() => {', "'use strict';", 'const __modules = {};'];
   for (const file of order) {
-    const { lines, exportNames, reexports, stars } = modules.get(file);
+    const { lines, exportNames, reexports, stars, localExports } = modules.get(file);
     const exported = [
+      ...localExports.map(({ local, exported: name }) => (local === name ? local : `${name}: ${local}`)),
       ...stars.map((dep) => `...__modules[${JSON.stringify(dep)}]`),
       ...reexports.map(({ dep, imported, local }) => `${local}: __modules[${JSON.stringify(dep)}].${imported}`),
       ...exportNames,

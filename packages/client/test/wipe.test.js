@@ -18,9 +18,11 @@ function fakeDocument({ viewTransitions = true } = {}) {
     doc.startViewTransition = (update) => {
       let finish;
       const finished = new Promise((resolve) => (finish = resolve));
-      transitions.push({ update, finish });
+      let rejectReady;
+      const ready = new Promise((_, reject) => (rejectReady = reject));
+      transitions.push({ update, finish, skip: () => rejectReady(new Error('InvalidStateError')) });
 
-      return { finished };
+      return { finished, ready };
     };
   }
 
@@ -243,4 +245,20 @@ test('the hold is released by the same physical key, whatever it types by then',
   listeners.get('keydown')({ key: '\\', code: 'Backslash', ctrlKey: true }); // a shortcut, not a hold
   listeners.get('keydown')({ key: '\\', code: 'Backslash', composedPath: () => [{ tagName: 'INPUT' }] }); // typing inside a shadow root
   assert.deepEqual(calls, [true, false]);
+});
+
+test('a skipped transition is not an unhandled rejection', async () => {
+  const { doc, transitions } = fakeDocument();
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    createWipe({ document: doc, matchMedia: motion(false) })(() => {});
+    transitions[0].skip();
+    transitions[0].finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });

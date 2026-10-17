@@ -219,3 +219,13 @@ test('a comment followed by code that opens a template literal still opens it', 
     assert.equal(out.after, 2);
   }
 });
+
+test('export { a, b as c } exports names already in scope', (t) => {
+  const dir = fixture(t, {
+    'a.js': "export const A = 1;\n",
+    'b.js': "import { A } from './a.js';\nconst B = 2;\nexport { A, B as Bee };\n",
+  });
+  const out = vm.runInNewContext(bundle(join(dir, 'b.js')));
+  assert.equal(out.A, 1);
+  assert.equal(out.Bee, 2);
+});

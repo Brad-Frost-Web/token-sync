@@ -144,9 +144,18 @@ One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-s
 - **Reset and lock.** A presenter can put every page back to its theme, or make controllers read-only. Over `broadcast` every tab is a presenter. Over the relay, only the holder of the room's presenter key is.
 - **Last write wins per token**, ordered by the channel's timestamps. Ties resolve the same way on every peer, so every tab ends up showing the same state.
 
-### Raw overrides only move the token you send
+### On Eddie pages: contract knobs, kept legible
 
-In Eddie's `bfw` build, component tokens hold literal values rather than `var()` references. Overriding `--ed-theme-color-background-brand` doesn't recolour a primary button, because the button reads `--ed-theme-button-primary-color-background-default`. That's why the demo's colour control sends the button token directly. Expanding one knob into every token derived from it, with contrast kept legible, is the Eddie contract adapter's job ([#9](https://github.com/Brad-Frost-Web/token-sync/issues/9)).
+In Eddie's `bfw` build, component tokens hold literal values rather than `var()` references. A raw override only moves the exact token sent: overriding `--ed-theme-color-background-brand` doesn't recolour a primary button.
+
+On a page that uses Eddie, the drop-in brings Eddie's theme contract (`packages/adapter-eddie`, built on `@brad-frost-web/eddie-design-tokens/contract`):
+
+- **Knobs.** `contract:color.background-brand` is one value that Eddie expands into every token derived from it: buttons, links, text on brand. Every colour knob and button knob in the contract is supported (`contract:color.<knob>`, `contract:buttons.<knob>`).
+- **Legibility.** When a knob, or a raw value that lands on a contract path, changes a colour, the contract's solver checks its foreground/background pairs against WCAG AA, using the theme's own button type scale. It moves *derived* text colours until they pass. Raw values on contract paths are kept and count as authored.
+- **Said out loud.** What the solver moved shows on the page as an `ed-toast` ("Nudged content brand 36% darker to stay readable."), and so does anything it couldn't fix. Nothing is hidden.
+- **Off the contract, nothing changes.** A raw value the contract doesn't cover passes through unsolved, exactly as on a non-Eddie page. A page that isn't Eddie gets no adapter at all.
+
+The bookmarklet leaves the adapter out to keep its URL short.
 
 ## Packages
 
@@ -180,6 +189,7 @@ Documented per AGENTS.md §1.6:
 - **The Node relay is about 400 lines, not 50.** Issue #2 pictured a ~50-line relay on a WebSocket library. Writing the WebSocket server by hand keeps it dependency-free, and moving the rules into a shared core (`src/room.js`) means self-hosting can't weaken them.
 - **Cloudflare, not Netlify, for the relay.** Netlify functions can't hold WebSockets. Cloudflare is already a BFW vendor (bf-brain), and FEATURE-SPEC §7 settles it. `wrangler` is the relay package's only dependency, and it's a dev dependency.
 - **Vanilla JS with no framework, no build and no Eddie runtime dependency** in the packages. They run inside other people's pages, so they carry nothing those pages didn't ask for. The lab's own UI (the demo pages here, and later the remote and the extension popup) is built from Eddie.
+- **The contract is imported by relative path into `node_modules`** (`../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/…`). The same file then runs unbundled in a browser, in Node, and through the bundler. The demo server serves that one folder.
 - **Our own bundler instead of a third-party one.** `tools/bundle.js` covers the handful of import/export forms these packages use and refuses the rest, which kept the build free of dependencies. If the packages ever need syntax it refuses, adopting esbuild (pinned) is the move, not stretching the bundler.
 - **Google Fonts.** AGENTS.md §2.2 forbids Google Fonts links. The applier's planned font sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)) will request from `fonts.googleapis.com` / `fonts.gstatic.com`, but only in an activated preview session. Brad decided this in FEATURE-SPEC §10 Q3. It's preview-only by construction, and nobody should copy the pattern into a shipping product.
 
