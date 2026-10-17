@@ -88,6 +88,19 @@ The demo's latency readout subtracts the relay's timestamp from the viewer's clo
 
 **The Cloudflare relay has not been deployed.** That's Brad's call: `npm exec --no -w packages/relay -- wrangler deploy` once approved.
 
+## The phone remote
+
+With a relay running, open the source page with `?relay=…`. It creates a room and shows a **phone remote** link to share with the audience: `packages/remote/index.html?room=<code>&relay=<url>`.
+
+The remote is an Eddie page that joins the room as a controller. Anyone holding it can change the button colour, the page background and the corner roundness on the big screen; the last change wins.
+
+- **Coalesced sends.** However fast someone drags a slider, the remote sends at most 10 messages a second (FEATURE-SPEC §8, `createCoalescer` in `client`).
+- **Status the controls can explain.** A polite live region says when it's joining, connected, reconnecting, unable to reach the room, paused, or reset. When the presenter locks the room, the controls are disabled and the remote says why.
+- **Controls show the room as it stands.** A remote that joins late, or hears a reset, moves its controls to the room's current values.
+- **Deferred:** a QR code and a short URL for the room (#18). For now the presenter shares the link.
+- **One known gap:** Eddie's colour swatches and slider thumb are smaller than the spec's 44 px phone target. They meet WCAG 2.5.8's 24 px. That's filed upstream (#16, Brad-Frost-Web/eddie-design-system#2457) rather than patched over with custom CSS.
+
+Once Eddie's #2447 lands, the remote can host `ed-r-theme-customizer mode="controller"` instead.
 ## From your token files: the CLI
 
 ```bash
@@ -146,7 +159,7 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
 | `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
 | `cli` | `token-sync watch`, `poll` and `relay` | Built |
-| `remote` | The phone remote | [#8](https://github.com/Brad-Frost-Web/token-sync/issues/8) |
+| `remote` | The phone remote | Built (interim, until Eddie #2447) |
 
 Also built: the before/after wipe and hold-to-compare key (`packages/client/src/wipe.js`). Planned: Google Fonts sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)).
 

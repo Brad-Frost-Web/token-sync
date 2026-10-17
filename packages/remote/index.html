@@ -1,0 +1,173 @@
+<!doctype html>
+<!-- eddie-template: ed-p-form — a single-column control form, without the site shell: it's a phone remote held during a talk -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync remote</title>
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/core/css/base.css" />
+    <script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Token Sync remote</h1></ed-heading>
+              Change the page on the big screen. Everyone in the room shares it; the last change wins.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Room</ed-heading>
+              <ed-text-passage slot="header"><p id="status" role="status">Connecting…</p></ed-text-passage>
+              <noscript>
+                <ed-text-passage><p>The remote needs JavaScript to join the room.</p></ed-text-passage>
+              </noscript>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Tokens</ed-heading>
+              <ed-stack gap="field">
+                <ed-color-picker
+                  id="button"
+                  size="lg"
+                  label="Button color"
+                  name="--ed-theme-button-primary-color-background-default"
+                  allowCustom
+                  disabled
+                ></ed-color-picker>
+                <ed-color-picker
+                  id="background"
+                  size="lg"
+                  label="Page background"
+                  name="--ed-theme-color-background-default"
+                  allowCustom
+                  disabled
+                ></ed-color-picker>
+                <ed-range
+                  id="radius"
+                  size="lg"
+                  label="Corner roundness"
+                  name="--ed-theme-border-radius-md"
+                  min="0"
+                  max="24"
+                  step="1"
+                  value="0"
+                  fieldNote="0 is square, 24 is very round."
+                  disabled
+                ></ed-range>
+              </ed-stack>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+
+    <script type="module">
+      import { connect, createCoalescer, createRemoteTransport } from '../client/src/index.js';
+      import { RESET_MESSAGE, remoteSettings, statusMessage } from './src/remote.js';
+
+      const status = document.getElementById('status');
+      const say = (text) => {
+        // Only a new sentence is worth announcing; repeating one is noise.
+        if (status.textContent !== text) status.textContent = text;
+      };
+      const pickers = ['button', 'background'].map((id) => document.getElementById(id));
+      const radius = document.getElementById('radius');
+      const RADIUS = '--ed-theme-border-radius-md';
+      const radiusNote = (px) => (radius.fieldNote = `Now ${px} px. 0 is square, 24 is very round.`);
+      const settings = remoteSettings(location.search, location.protocol);
+      if (!settings.ok) {
+        say(settings.error);
+      } else {
+        let connection = 'connecting';
+        let locked = false;
+        let everConnected = false;
+        let failed = false;
+        const show = () => {
+          say(statusMessage({ room: settings.room, connection, locked, everConnected, failed }));
+          for (const field of [...pickers, radius]) field.disabled = connection !== 'open' || locked;
+        };
+        /** Make every control show what the room holds now. */
+        const reflect = (props) => {
+          for (const picker of pickers) {
+            const value = props[picker.getAttribute('name')];
+            if (value && picker.value !== value) picker.value = value;
+          }
+          const px = Number.parseFloat(props[RADIUS] ?? '0');
+          if (Number.isFinite(px) && String(radius.value) !== String(px)) radius.value = String(px);
+          radiusNote(Number.isFinite(px) ? px : 0);
+        };
+        const transport = createRemoteTransport({
+          url: settings.socket,
+          onStatus: ({ state }) => {
+            if (state === 'open') everConnected = true;
+            if (state === 'closed' && !everConnected) failed = true;
+            // A retry after a failure isn't news: keep saying we can't reach it.
+            if (state === 'connecting' && failed && !everConnected) return;
+            connection = state;
+            show();
+          },
+          onRelayError: (message) => say(`The room didn't take that: ${message}`),
+        });
+        const session = connect({
+          room: settings.room,
+          transport,
+          role: 'controller',
+          onChange: ({ locked: now, message, props }) => {
+            reflect(props);
+            if (message.op === 'reset' && everConnected) {
+              outbox.forget();
+              say(RESET_MESSAGE);
+            } else if (now !== locked) {
+              locked = now;
+              show();
+            }
+          },
+        });
+        // At most 10 messages a second however fast a slider moves (spec §8).
+        const outbox = createCoalescer((props) => session.set(props));
+        addEventListener('pagehide', () => outbox.flush());
+
+        await customElements.whenDefined('ed-color-picker');
+        const swatches = (list) => list.map(([label, color]) => ({ value: color, color, label }));
+        pickers[0].palette = swatches([
+          ['Tomato', '#c0392b'],
+          ['Ocean', '#1b4dd8'],
+          ['Forest', '#2e7d32'],
+          ['Plum', '#6a1b9a'],
+          ['Teal', '#00796b'],
+          ['Ink', '#283593'],
+        ]);
+        pickers[1].palette = swatches([
+          ['Paper', '#fbfaf5'],
+          ['Sky', '#e8eefc'],
+          ['Mint', '#e6f4ea'],
+          ['Blush', '#fbe9e7'],
+          ['Sand', '#f6f0dc'],
+        ]);
+        reflect(session.props());
+
+        for (const picker of pickers) {
+          const name = picker.getAttribute('name');
+          picker.addEventListener('input', (event) => event.detail?.value && outbox.push({ [name]: event.detail.value }));
+          picker.addEventListener('change', (event) => {
+            if (!event.detail?.value) return;
+            outbox.push({ [name]: event.detail.value });
+            outbox.flush();
+          });
+        }
+        radius.addEventListener('input', (event) => {
+          const value = event.target.value;
+          if (value === undefined) return;
+          radiusNote(value);
+          outbox.push({ [RADIUS]: `${value}px` });
+        });
+      }
+    </script>
+  </body>
+</html>
