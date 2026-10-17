@@ -33,6 +33,16 @@ The demo pages load Eddie from unpkg, so they need a network connection to rende
 
 The script does nothing on an ordinary page view. Visit the page with `?token-sync=<room>` and that tab joins the room, then stays in it for the rest of the tab's session as you click around. `?token-sync=off` leaves.
 
+### Or as one file
+
+`npm run build` writes `dist/token-sync.js`: the same drop-in as a single classic script, with no module graph to serve. Load it with `<script src="token-sync.js"></script>`, and it exposes `window.TokenSync` (`start`, `resolveRoom`).
+
+## The bookmarklet
+
+To preview a site you can't add a script to, run `npm start` and open <http://127.0.0.1:4321/demo/bookmarklet.html>. Drag the link to your bookmarks bar, select it on any page, and type a room code. Type `off` to leave. It only reaches the page you select it on, and a strict Content Security Policy can block it. `npm run build` also writes the URL to `dist/bookmarklet.txt`.
+
+Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency. It refuses anything it doesn't translate (default exports, namespace imports, dynamic `import()`, cycles) rather than guessing.
+
 ## The protocol: `token-sync/1`
 
 One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-system#2447](https://github.com/Brad-Frost-Web/eddie-design-system/pull/2447):
@@ -68,14 +78,14 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | `client` | Transports (`local`, `broadcast`) and the applier | Built. `remote` arrives with the relay. |
 | `script` | The `?token-sync=<room>` drop-in | Built |
 | `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | [#2](https://github.com/Brad-Frost-Web/token-sync/issues/2) |
-| `bookmarklet` | One-click applier for any page | [#3](https://github.com/Brad-Frost-Web/token-sync/issues/3) |
+| `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
 | `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
 | `cli` | `token-sync watch` and `token-sync poll` | [#5](https://github.com/Brad-Frost-Web/token-sync/issues/5), [#6](https://github.com/Brad-Frost-Web/token-sync/issues/6) |
 | `remote` | The phone remote | [#8](https://github.com/Brad-Frost-Web/token-sync/issues/8) |
 
 Also planned: the before/after wipe ([#7](https://github.com/Brad-Frost-Web/token-sync/issues/7)) and Google Fonts sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)).
 
-The packages are plain ES modules with no runtime dependencies and no build step. They import each other by relative path, so a browser can load them straight from disk. A bundler joins when the bookmarklet needs a single file ([#3](https://github.com/Brad-Frost-Web/token-sync/issues/3)).
+The packages are plain ES modules with no runtime dependencies. They import each other by relative path, so a browser can load them straight from disk, and `npm run build` makes the single-file versions.
 
 ## Tests
 
@@ -83,7 +93,7 @@ The packages are plain ES modules with no runtime dependencies and no build step
 npm test
 ```
 
-Node's built-in test runner. The suites cover the value refusals, message validation, last-write-wins ordering and convergence, snapshots for late joiners, damping (with fake timers), and the broadcast transport over a real `BroadcastChannel`.
+Node's built-in test runner. The suites cover the bundler and the built bookmarklet (run end to end in a sandbox), the value refusals, message validation, last-write-wins ordering and convergence, snapshots for late joiners, damping (with fake timers), and the broadcast transport over a real `BroadcastChannel`.
 
 ## Deviations from the BFW defaults
 

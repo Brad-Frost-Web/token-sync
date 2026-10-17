@@ -46,17 +46,27 @@ export function resolveRoom({ search, storage }) {
 }
 
 /**
- * Join the room named by the URL or the session, and apply it to this page.
- * @param {{ location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object }} [context]
+ * Join the room named by the URL or the session — or `room`, when a caller
+ * such as the bookmarklet names one — and apply it to this page. A tab is in
+ * one room at a time: starting again leaves the previous room first.
+ * @param {{ room?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object }} [context]
  */
 export function start({
+  room: requested,
   location = globalThis.location,
   storage = safeSessionStorage(),
   document = globalThis.document,
   transport = 'broadcast',
 } = {}) {
-  const room = resolveRoom({ search: location?.search ?? '', storage });
-  if (!room || !document) return null;
+  const search = requested === undefined ? (location?.search ?? '') : `?${PARAM}=${encodeURIComponent(requested)}`;
+  const room = resolveRoom({ search, storage });
+  globalThis.tokenSync?.close?.();
+  globalThis.tokenSync = null;
+  if (!room || !document) {
+    if (document?.documentElement) delete document.documentElement.dataset.tokenSync;
+
+    return null;
+  }
 
   // The newest message folded in. A `set` is a live change, so its age when it
   // lands is the delivery time; a `snapshot` is a late joiner catching up, and
@@ -85,6 +95,7 @@ export function start({
   });
   document.documentElement.dataset.tokenSync = room;
   console.info(`token-sync: previewing room "${room}" in this tab. Add ?${PARAM}=off to the URL to leave.`);
+  globalThis.tokenSync = session;
 
   return session;
 }
@@ -97,6 +108,6 @@ function safeSessionStorage() {
   }
 }
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  globalThis.tokenSync = start();
+if (typeof window !== 'undefined' && typeof document !== 'undefined' && !globalThis.TOKEN_SYNC_MANUAL_START) {
+  start();
 }
