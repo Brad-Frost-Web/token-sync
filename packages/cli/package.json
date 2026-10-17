@@ -2,7 +2,10 @@
   "name": "@brad-frost-web/token-sync-cli",
   "version": "0.0.0",
   "private": true,
-  "description": "token-sync watch <path> and token-sync poll <css-url>.",
+  "description": "token-sync watch <built.css>, token-sync poll <css-url>, token-sync relay. No dependencies.",
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "bin": {
+    "token-sync": "bin/token-sync.js"
+  }
 }

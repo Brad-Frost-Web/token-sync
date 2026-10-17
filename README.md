@@ -86,6 +86,24 @@ The demo's latency readout subtracts the relay's timestamp from the viewer's clo
 
 **The Cloudflare relay has not been deployed.** That's Brad's call: `npm exec --no -w packages/relay -- wrangler deploy` once approved.
 
+## From your token files: the CLI
+
+```bash
+npx --no token-sync relay                                  # a local relay, if you don't have one
+npx --no token-sync watch dist/tokens.css                  # send what changes in a built stylesheet
+npx --no token-sync watch dist/tokens.css --build "npm run tokens" --src tokens/
+npx --no token-sync poll https://codepen.io/…/pen.css      # follow a stylesheet you can't build
+```
+
+(`npx --no` runs the copy in this repo's workspace. From the root, `node packages/cli/bin/token-sync.js` works too.)
+
+- **`watch`** reads the custom properties in a built stylesheet. On every save it sends only the ones that changed. With `--build` and `--src`, saving a file under the source folder runs your own build first, whether that's Style Dictionary or anything else that writes the stylesheet. Token Sync doesn't depend on Style Dictionary.
+- **`poll`** does the same for a stylesheet at a URL, every `--interval` milliseconds (2000 by default): a CodePen, or a deploy preview.
+- Both talk to a relay (`--relay`, default `http://127.0.0.1:8787`). Without `--room` they create one and print its code and presenter key; open the target page in that room.
+- `--selector ":root"` keeps only the properties declared under that selector, for a stylesheet that defines several themes.
+- `--send-initial` sends every property once at start.
+- A value the protocol refuses is not sent, and the CLI says why. A property that disappears from the stylesheet can't be un-set over the wire, so pages keep its last value; the CLI says that too.
+
 ## The protocol: `token-sync/1`
 
 One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-system#2447](https://github.com/Brad-Frost-Web/eddie-design-system/pull/2447):
@@ -123,7 +141,7 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | Built, not deployed |
 | `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
 | `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
-| `cli` | `token-sync watch` and `token-sync poll` | [#5](https://github.com/Brad-Frost-Web/token-sync/issues/5), [#6](https://github.com/Brad-Frost-Web/token-sync/issues/6) |
+| `cli` | `token-sync watch`, `poll` and `relay` | Built |
 | `remote` | The phone remote | [#8](https://github.com/Brad-Frost-Web/token-sync/issues/8) |
 
 Also planned: the before/after wipe ([#7](https://github.com/Brad-Frost-Web/token-sync/issues/7)) and Google Fonts sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)).
