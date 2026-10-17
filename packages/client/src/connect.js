@@ -20,12 +20,23 @@ import { createBroadcastTransport, createLocalTransport } from './transports.js'
  *   onChange?: (info: { props: Record<string, string>, changed: string[], message: object, locked: boolean }) => void,
  *   onError?: (info: { errors: string[], message: unknown }) => void,
  *   keyFor?: (key: string) => string,
- * }} options `keyFor` names the room-state key for a prop key; a design
+ *   inScope?: (scope: string) => boolean,
+ * }} options `inScope` says whether this page wears a theme; by default, a
+ *   theme is worn when <html> carries its class (as Eddie applies themes).
+ *   An edit scoped to another theme is kept, for answering others, but not
+ *   shown here. `keyFor` names the room-state key for a prop key; a design
  *   system's adapter uses it to make two spellings of one token one key. `presenter` grants reset and lock. Over `broadcast` every tab is a
  *   presenter (spec §8). Over the relay the relay decides, by presenter key,
  *   and a transport exposing `isPresenter` (the remote one) answers for it.
  */
-export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {}, keyFor = null }) {
+/** Whether this page wears a theme: <html class="bfw">. With no page, every theme. */
+function pageWears(scope) {
+  const classes = globalThis.document?.documentElement?.classList;
+
+  return classes ? classes.contains(scope) : true;
+}
+
+export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {}, keyFor = null, inScope = pageWears }) {
   if (!isRoom(room)) throw new Error(`token-sync: "${room}" is not a valid room code`);
   const state = createRoomState();
   const getSnapshot = (options) => state.snapshotMessages(room, options);
@@ -55,12 +66,22 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
     if (isSnapshotRequest(message)) return;
     const outcome = state.apply(message);
     if (!outcome.applied) return;
-    applier?.render(state.props());
-    onChange({ props: state.props(), changed: outcome.changed, message, locked: state.locked });
+    const shown = state.props(inScope);
+    applier?.render(shown);
+    onChange({ props: shown, changed: outcome.changed, message, locked: state.locked });
   });
 
-  function send(op, from, props) {
-    const message = createMessage({ room, op, from, props });
+  // A page that switches theme mid-session shows that theme's edits at once,
+  // not at the next message.
+  const html = inScope === pageWears ? globalThis.document?.documentElement : null;
+  const themeWatch =
+    applier && html && typeof globalThis.MutationObserver === 'function'
+      ? new globalThis.MutationObserver(() => applier.render(state.props(inScope)))
+      : null;
+  themeWatch?.observe(html, { attributes: true, attributeFilter: ['class'] });
+
+  function send(op, from, props, scope) {
+    const message = createMessage({ room, op, from, props, scope });
     const result = validateMessage(message, { requireTs: false });
     if (!result.ok) throw new Error(`token-sync: refused to send — ${result.errors.join('; ')}`);
     if (result.refused.length) throw new Error(`token-sync: refused to send — ${result.refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`);
@@ -79,16 +100,18 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
   return {
     room,
     /** Send one or more token changes. */
-    set: (props) => send('set', role, props),
+    /** `scope`: the theme this edit is for; leave it out for every theme. */
+    set: (props, { scope } = {}) => send('set', role, props, scope),
     reset: () => presenterOnly('reset'),
     lock: () => presenterOnly('lock'),
     unlock: () => presenterOnly('unlock'),
-    props: () => state.props(),
+    props: () => state.props(inScope),
     get locked() {
       return state.locked;
     },
     /** Leave the room and put the page back the way it was. */
     close() {
+      themeWatch?.disconnect();
       unsubscribe();
       channel.close();
       applier?.destroy();
