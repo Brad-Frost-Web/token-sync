@@ -103,7 +103,7 @@ test('reports contract knobs as needing the adapter rather than guessing', () =>
   const { root, applier, refused } = setup({});
   applier.render({ 'contract:color.background-brand': '#f05735' });
   assert.deepEqual(root.writes, []);
-  assert.match(refused[0].reason, /contract adapter/);
+  assert.match(refused[0].reason, /page that uses Eddie/);
 });
 
 test('keys that leave the state go back to what the page had, inline values included', () => {
@@ -157,4 +157,49 @@ test('a refused value keeps the last good one on screen and is reported once', (
   applier.render({ '--brand': '12px' });
   assert.equal(root.get('--brand'), '#000000');
   assert.equal(refused.length, 1);
+});
+
+test('an adapter runs inside damping: a burst of messages resolves a few times, not once per message', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    const root = fakeRoot({ '--brand': '#be6700' });
+    let calls = 0;
+    const statuses = [];
+    const applier = createApplier({
+      root,
+      readComputed: root.computed,
+      timers: { now: () => Date.now(), setTimeout, clearTimeout },
+      resolve: (props) => {
+        calls += 1;
+
+        return { props: { '--brand': props['contract:brand'] }, status: { moved: [], problems: [], unchecked: 0 } };
+      },
+      onResolved: (status) => statuses.push(status),
+    });
+    for (let i = 0; i < 60; i += 1) {
+      applier.render({ 'contract:brand': `#00000${i % 10}` });
+      mock.timers.tick(16);
+    }
+    mock.timers.tick(1000);
+    assert.ok(calls <= 5, `resolved ${calls} times for 60 messages`);
+    assert.equal(statuses.length, calls);
+    assert.equal(root.get('--brand'), '#000009');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('what an adapter refuses is reported once, and what it resolves is still type-checked', () => {
+  const root = fakeRoot({ '--brand': '#be6700' });
+  const refused = [];
+  const applier = createApplier({
+    root,
+    readComputed: root.computed,
+    resolve: () => ({ props: { '--brand': '12px' }, refused: [{ name: 'contract:x', value: '1', reason: 'unknown knob' }] }),
+    onRefuse: (r) => refused.push(r.name),
+  });
+  applier.render({ 'contract:x': '1' });
+  applier.render({ 'contract:x': '1' });
+  assert.deepEqual(refused, ['contract:x', '--brand']);
+  assert.equal(root.get('--brand'), undefined);
 });

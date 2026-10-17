@@ -11,10 +11,16 @@ import { bundle, REPO_ROOT } from '../../tools/bundle.js';
 import { join } from 'node:path';
 
 const SCRIPT_ENTRY = join(REPO_ROOT, 'packages/script/src/token-sync.js');
+const EDDIE_SCRIPT_ENTRY = join(REPO_ROOT, 'packages/script/src/token-sync-eddie.js');
 const BOOKMARKLET_ENTRY = join(REPO_ROOT, 'packages/bookmarklet/src/bookmarklet.js');
 
 export function tokenSyncScript() {
   return `/* Token Sync drop-in — https://github.com/Brad-Frost-Web/token-sync */\n${bundle(SCRIPT_ENTRY, { globalName: 'TokenSync' })}`;
+}
+
+/** The drop-in for Eddie sites, with the theme contract, as one classic script. */
+export function tokenSyncEddieScript() {
+  return `/* Token Sync drop-in for Eddie sites — https://github.com/Brad-Frost-Web/token-sync */\n${bundle(EDDIE_SCRIPT_ENTRY, { globalName: 'TokenSync' })}`;
 }
 
 export function bookmarkletSource() {

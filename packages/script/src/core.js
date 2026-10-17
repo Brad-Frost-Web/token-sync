@@ -89,7 +89,9 @@ export function resolveRoom({ search, storage }) {
  * The page talks to a relay when it declares one with
  * `<meta name="token-sync-relay" content="…">`, and over BroadcastChannel
  * (this browser only) when it doesn't.
- * @param {{ room?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object }} [context]
+ * @param {{ room?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object, createAdapter?: Function, onResolved?: Function }} [context]
+ *   `createAdapter({ readComputed, document })` returns a design system's
+ *   adapter for this page (or null); `onResolved(status)` hears its status.
  */
 export function start({
   room: requested,
@@ -98,6 +100,7 @@ export function start({
   document = globalThis.document,
   transport,
   createAdapter = null,
+  onResolved = () => {},
 } = {}) {
   if (requested !== undefined && requested !== 'off' && !isRoom(requested)) {
     // Refuse before touching anything: a typo must not silently drop the room
@@ -129,11 +132,11 @@ export function start({
   // A design system's adapter, when the caller has one for this page (the
   // drop-in passes Eddie's on Eddie pages); otherwise tokens apply as sent.
   const readComputed = (name) => globalThis.getComputedStyle?.(document.documentElement)?.getPropertyValue(name) ?? '';
-  const eddie = createAdapter?.({ readComputed }) ?? null;
+  const adapter = createAdapter?.({ readComputed, document }) ?? null;
   const applier = createApplier({
     root: document.documentElement,
-    resolve: eddie?.resolve ?? null,
-    onNotice: (message) => notify(document, message),
+    resolve: adapter?.resolve ?? null,
+    onResolved,
     transition: (update, { cause }) => (sweepChanges || cause === 'hold' ? wipe(update) : update()),
     // Read after onChange below has recorded the newest message, whichever
     // order the two arrive in — so a damped change reports its real delay.
@@ -179,23 +182,6 @@ export function start({
   globalThis.tokenSync = session;
 
   return session;
-}
-
-/**
- * Say what the contract changed, where the audience can see it (spec §5: "we
- * nudged it"). On an Eddie page that's an ed-toast for a few seconds; the
- * message also goes to the console, which is all a page without one gets.
- */
-function notify(document, message) {
-  console.info(`token-sync: ${message}`);
-  if (!globalThis.customElements?.get?.('ed-toast') || !document.body) return;
-  const toast = document.createElement('ed-toast');
-  const text = document.createElement('ed-text-passage');
-  text.setAttribute('size', 'sm');
-  text.append(Object.assign(document.createElement('p'), { textContent: message }));
-  toast.append(text);
-  document.body.append(toast);
-  setTimeout(() => toast.remove(), 6000);
 }
 
 function safeSessionStorage() {

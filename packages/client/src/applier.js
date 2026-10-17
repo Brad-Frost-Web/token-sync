@@ -28,14 +28,16 @@ const CONTRACT_PREFIX = 'contract:';
  *   onApply?: (info: { changed: string[], at: number }) => void,
  *   onRefuse?: (info: { name: string, value: string, reason: string }) => void,
  *   transition?: (update: () => void, info: { cause: 'render' | 'hold' }) => void,
- *   resolve?: (props: Record<string, string>) => { props: Record<string, string>, notices?: string[], refused?: { name: string, value: string, reason: string }[] },
- *   onNotice?: (message: string) => void,
+ *   resolve?: (props: Record<string, string>) => { props: Record<string, string>, refused?: { name: string, value: string, reason: string }[], status?: object },
+ *   onResolved?: (status: object) => void,
  * }} [options] `transition` wraps each batch of writes, e.g. in a View
  *   Transition (see wipe.js). It must call `update` exactly once, now or
  *   later; the writes are worked out when `update` runs, so a late callback
  *   writes the newest state, and one that runs after destroy() writes nothing.
  *   `resolve` is a design system's adapter (adapter-eddie): it turns the
  *   room's props into the custom properties to apply, before any check runs.
+ *   It runs inside damping — once per change that reaches the page, not once
+ *   per message — and `onResolved` gets its status each time.
  */
 export function createApplier({
   root = globalThis.document?.documentElement,
@@ -50,7 +52,7 @@ export function createApplier({
   onRefuse = () => {},
   transition = (update) => update(),
   resolve = null,
-  onNotice = () => {},
+  onResolved = () => {},
 } = {}) {
   if (!root?.style) throw new Error('token-sync: the applier needs an element to apply to');
   // A hair over 1000 / max, so a timer firing a millisecond early can never
@@ -109,8 +111,50 @@ export function createApplier({
     }
   }
 
+  /** The room's latest props, waiting to be resolved (only when there's an adapter). */
+  let room = null;
+
+  function report(refusal) {
+    if (reported.has(`${refusal.name} ${refusal.value}`)) return;
+    reported.add(`${refusal.name} ${refusal.value}`);
+    onRefuse(refusal);
+  }
+
+  /** Check props against the page and the protocol; refused keys keep their last good value. */
+  function checked(props) {
+    const next = {};
+    for (const [name, value] of Object.entries(props)) {
+      if (name.startsWith(CONTRACT_PREFIX)) {
+        report({ name, value, reason: resolve ? 'not a knob the adapter could use' : "contract knobs need a page that uses Eddie (no design-system adapter is active here)" });
+        continue;
+      }
+      const check = checkValue(value, typeOf(name));
+      if (!check.ok) {
+        report({ name, value, reason: check.reason });
+        // Keep the last good value rather than snapping back — taken from
+        // the state, not the page, which is empty while held.
+        if (name in desired) next[name] = desired[name];
+        continue;
+      }
+      next[name] = value;
+    }
+
+    return next;
+  }
+
+  /** Bring `desired` up to date: run the adapter on the latest room state, once. */
+  function settle() {
+    if (room === null) return;
+    const resolved = resolve(room);
+    room = null;
+    for (const refusal of resolved.refused ?? []) report(refusal);
+    if (resolved.status) onResolved(resolved.status);
+    desired = checked(resolved.props);
+  }
+
   /** Would flushing now change anything on screen? */
   function pending() {
+    settle();
     const target = held ? {} : desired;
 
     return Object.entries(target).some(([name, value]) => applied.get(name) !== value) || [...applied.keys()].some((name) => !(name in target));
@@ -130,6 +174,7 @@ export function createApplier({
       // more later, and by then the state may have moved on or the tab may
       // have left the room.
       if (!alive) return;
+      settle();
       const writes = plan(held ? {} : desired);
       if (!writes.length) return;
       write(writes);
@@ -151,42 +196,9 @@ export function createApplier({
      * its last good value.
      * @param {Record<string, string>} props
      */
-    render(roomProps) {
-      let props = roomProps;
-      if (resolve) {
-        const resolved = resolve(roomProps);
-        props = resolved.props;
-        for (const message of resolved.notices ?? []) onNotice(message);
-        for (const refusal of resolved.refused ?? []) {
-          if (!reported.has(`${refusal.name} ${refusal.value}`)) {
-            reported.add(`${refusal.name} ${refusal.value}`);
-            onRefuse(refusal);
-          }
-        }
-      }
-      const next = {};
-      for (const [name, value] of Object.entries(props)) {
-        if (name.startsWith(CONTRACT_PREFIX)) {
-          if (!reported.has(name)) {
-            reported.add(name);
-            onRefuse({ name, value, reason: 'contract knobs need the Eddie contract adapter, which is not installed' });
-          }
-          continue;
-        }
-        const check = checkValue(value, typeOf(name));
-        if (!check.ok) {
-          if (!reported.has(`${name} ${value}`)) {
-            reported.add(`${name} ${value}`);
-            onRefuse({ name, value, reason: check.reason });
-          }
-          // Keep the last good value rather than snapping back — taken from
-          // the state, not the page, which is empty while held.
-          if (name in desired) next[name] = desired[name];
-          continue;
-        }
-        next[name] = value;
-      }
-      desired = next;
+    render(props) {
+      if (resolve) room = props; // resolved in the next flush, inside damping
+      else desired = checked(props);
       schedule();
     },
     /**

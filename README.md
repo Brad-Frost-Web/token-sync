@@ -148,12 +148,11 @@ One JSON message per change, defined in `FEATURE-SPEC.md` §6 on [eddie-design-s
 
 In Eddie's `bfw` build, component tokens hold literal values rather than `var()` references. A raw override only moves the exact token sent: overriding `--ed-theme-color-background-brand` doesn't recolour a primary button.
 
-On a page that uses Eddie, the drop-in brings Eddie's theme contract (`packages/adapter-eddie`, built on `@brad-frost-web/eddie-design-tokens/contract`):
+On an Eddie site, use the Eddie drop-in, `packages/script/src/token-sync-eddie.js` (`dist/token-sync-eddie.js` once built), instead of `token-sync.js`. It brings Eddie's theme contract (`packages/adapter-eddie`, built on `@brad-frost-web/eddie-design-tokens/contract`). The plain drop-in leaves it out, because the contract adds about 70 KB that a site not built on Eddie has no use for. The adapter switches on once the page shows Eddie's tokens, including a page whose stylesheet arrives after the script.
 
-- **Knobs.** `contract:color.background-brand` is one value that Eddie expands into every token derived from it: buttons, links, text on brand. Every colour knob and button knob in the contract is supported (`contract:color.<knob>`, `contract:buttons.<knob>`).
-- **Legibility.** When a knob, or a raw value that lands on a contract path, changes a colour, the contract's solver checks its foreground/background pairs against WCAG AA, using the theme's own button type scale. It moves *derived* text colours until they pass. Raw values on contract paths are kept and count as authored.
-- **Said out loud.** What the solver moved shows on the page as an `ed-toast` ("Nudged content brand 36% darker to stay readable."), and so does anything it couldn't fix. Nothing is hidden.
-- **Off the contract, nothing changes.** A raw value the contract doesn't cover passes through unsolved, exactly as on a non-Eddie page. A page that isn't Eddie gets no adapter at all.
+- **Knobs.** `contract:color.background-brand` is one value that Eddie expands into every token derived from it: buttons, links, text on brand. Only what a knob actually changes is written; an accent knob touches its accent and the text on it, nothing else. Colour and button knobs are supported (`contract:color.<knob>`, `contract:buttons.<knob>`). Border, shadow, motion and gradient knobs are [#22](https://github.com/Brad-Frost-Web/token-sync/issues/22).
+- **Legibility.** When a knob, or a raw colour that lands on a contract path, changes a colour, the contract's solver checks every foreground/background pair against WCAG AA. It uses the theme's own button type scale, so buttons get the large-text floor only where the theme earns it. It may move any *text* colour, including a raw one, to keep it legible. It keeps authored backgrounds where they are.
+- **Said out loud.** What the solver moved shows on the page briefly, in one `ed-toast` ("Nudged content brand 36% darker to stay readable."). What it couldn't fix, or couldn't check (a colour that isn't hex), stays on screen until it clears. Raw values outside the contract are applied as sent, and the page says how many went unchecked. Everything also goes to the console, which is all a page without `ed-toast` gets.
 
 The bookmarklet leaves the adapter out to keep its URL short.
 

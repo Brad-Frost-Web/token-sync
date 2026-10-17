@@ -55,46 +55,62 @@ test('a knob that would make text illegible is solved: every contract pair clear
   const readComputed = bfwTheme();
   const adapter = createEddieAdapter({ readComputed });
   // A pale brand: white button text on it would fail.
-  const { props, notices } = adapter.resolve({ 'contract:color.background-brand': '#f5d76e' });
+  const { props, status } = adapter.resolve({ 'contract:color.background-brand': '#f5d76e' });
   const result = auditPage(readComputed, pageAfter(readComputed, props));
   assert.equal(result.failures.filter((f) => f.ratio !== null).length, 0, JSON.stringify(result.failures.slice(0, 3)));
-  assert.ok(notices.length > 0);
-  assert.match(notices[0], /Nudged .* (darker|lighter) to stay readable/);
+  assert.ok(status.moved.length > 0);
+  assert.match(status.moved[0], /Nudged .* (darker|lighter) to stay readable/);
 });
 
 test('a raw value that lands on a contract path is kept, and what pairs with it is solved', () => {
   const readComputed = bfwTheme();
   const adapter = createEddieAdapter({ readComputed });
   // Brand text made too pale to read on the page: the solver darkens what renders on it.
-  const { props, notices } = adapter.resolve({ '--ed-theme-color-content-brand': '#e8c07a' });
+  const { props, status } = adapter.resolve({ '--ed-theme-color-content-brand': '#e8c07a' });
   assert.ok(props['--ed-theme-color-content-brand']);
   const result = auditPage(readComputed, pageAfter(readComputed, props));
   assert.equal(result.failures.filter((f) => f.ratio !== null).length, 0, JSON.stringify(result.failures.slice(0, 3)));
-  assert.ok(notices.some((n) => /content brand/.test(n)));
+  assert.ok(status.moved.some((n) => /content brand/.test(n)));
 });
 
 test('what the solver cannot fix is said out loud, never hidden', () => {
   const adapter = createEddieAdapter({ readComputed: bfwTheme() });
   // A dark page with the theme's light "subtle" background left as it is: no
   // single text colour can clear both, and the solver says so.
-  const { props, notices } = adapter.resolve({ '--ed-theme-color-background-default': '#111111' });
+  const { props, status } = adapter.resolve({ '--ed-theme-color-background-default': '#111111' });
   assert.equal(props['--ed-theme-color-background-default'], '#111111');
-  assert.ok(notices.some((n) => /Couldn't keep .* readable/.test(n)));
+  assert.ok(status.problems.some((n) => /Couldn't keep .* readable/.test(n)));
 });
 
-test('a raw value outside the contract passes through untouched, and nothing else changes', () => {
+test('a raw value outside the contract passes through untouched, nothing else changes, and it is counted as unchecked', () => {
   const adapter = createEddieAdapter({ readComputed: bfwTheme() });
-  const { props, notices } = adapter.resolve({ '--my-site-gap': '2rem' });
+  const { props, status } = adapter.resolve({ '--my-site-gap': '2rem' });
   assert.deepEqual(props, { '--my-site-gap': '2rem' });
-  assert.deepEqual(notices, []);
+  assert.deepEqual(status, { moved: [], problems: [], unchecked: 1 });
 });
 
-test('the same notices are not repeated on every message', () => {
+test('a knob only writes what it changed: an unrelated knob leaves the brand alone, and a knob at the theme\'s own value writes nothing', () => {
+  const readComputed = bfwTheme();
+  const accent = createEddieAdapter({ readComputed }).resolve({ 'contract:color.accent-3': '#c0ffee' });
+  assert.ok(Object.keys(accent.props).every((name) => /accent-3/.test(name)), Object.keys(accent.props).join(', '));
+  assert.deepEqual(accent.status.moved.filter((m) => /brand/.test(m)), []);
+  const same = createEddieAdapter({ readComputed }).resolve({ 'contract:color.background-brand': readComputed('--ed-theme-color-background-brand') });
+  assert.deepEqual(same.props, {});
+});
+
+test('a colour on a contract path that cannot be checked is applied, and said so', () => {
   const adapter = createEddieAdapter({ readComputed: bfwTheme() });
-  const first = adapter.resolve({ 'contract:color.background-brand': '#f5d76e' }).notices;
-  const again = adapter.resolve({ 'contract:color.background-brand': '#f5d76e', '--x': '1px' }).notices;
-  assert.ok(first.length > 0);
-  assert.deepEqual(again, []);
+  const { props, status } = adapter.resolve({ '--ed-theme-color-background-brand': 'oklch(60% 0.2 30)' });
+  assert.equal(props['--ed-theme-color-background-brand'], 'oklch(60% 0.2 30)');
+  assert.match(status.problems[0], /Couldn't contrast-check --ed-theme-color-background-brand/);
+});
+
+test('a knob being typed keeps its last good value instead of snapping back', () => {
+  const adapter = createEddieAdapter({ readComputed: bfwTheme() });
+  adapter.resolve({ 'contract:color.background-brand': '#1b4dd8' });
+  const typing = adapter.resolve({ 'contract:color.background-brand': '#1b4d' });
+  assert.equal(typing.props['--ed-theme-color-background-brand'], '#1b4dd8');
+  assert.equal(typing.refused.length, 1);
 });
 
 test('unknown knobs and unreadable colours are refused with a reason', () => {
@@ -112,6 +128,11 @@ test('the theme as shipped needs nothing: a no-op change nudges nothing', () => 
   const readComputed = bfwTheme();
   const adapter = createEddieAdapter({ readComputed });
   const brand = readComputed('--ed-theme-color-background-brand');
-  const { notices } = adapter.resolve({ '--ed-theme-color-background-brand': brand });
-  assert.deepEqual(notices, []);
+  const { status } = adapter.resolve({ '--ed-theme-color-background-brand': brand });
+  assert.deepEqual(status.moved, []);
+  assert.deepEqual(status.problems, []);
+});
+
+test('a background the solver eases is described without a percentage', () => {
+  assert.equal(describeMove({ path: 'button.primary.color.background.active', kind: 'background' }), 'Eased button primary background active so the text on it stays readable.');
 });
