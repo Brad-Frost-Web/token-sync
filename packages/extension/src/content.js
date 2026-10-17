@@ -2,11 +2,13 @@
 //
 // Messages come from the background over a port; the same client code as the
 // drop-in validates them, keeps last-write-wins state and applies them with
-// every guardrail (setProperty only, refusals, damping, hold \ to compare).
+// every guardrail (setProperty only, refusals, damping, hold \ to compare),
+// and Eddie's contract on Eddie pages.
 // Injected again after each navigation; a second injection into the same
 // page is a no-op.
 
 import { connect, createApplier, createWipe, holdToCompare } from '../../client/src/index.js';
+import { createNotifier, lazyEddieAdapter } from '../../script/src/eddie.js';
 import { PORT_NAME } from './constants.js';
 
 const HEARTBEAT_MS = 20000;
@@ -23,8 +25,13 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
   let attempts = 0;
 
   const wipe = createWipe({ document });
+  // On an Eddie page, Eddie's contract: knobs expand and stay legible, and
+  // what was nudged shows on the page (the same as token-sync-eddie.js).
+  const readComputed = (name) => globalThis.getComputedStyle?.(document.documentElement)?.getPropertyValue(name) ?? '';
   const applier = createApplier({
     root: document.documentElement,
+    resolve: lazyEddieAdapter({ readComputed }).resolve,
+    onResolved: createNotifier(document),
     transition: (update, { cause }) => (cause === 'hold' ? wipe(update) : update()),
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
