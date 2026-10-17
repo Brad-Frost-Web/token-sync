@@ -1,0 +1,23 @@
+{
+  "name": "token-sync",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Change design token values and watch any website update in real time.",
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "node demo/server.js",
+    "test": "node --test \"packages/*/test/*.test.js\"",
+    "bfw:ship": "bfw-process verify-phase ship",
+    "bfw:verify:tests": "npm test"
+  },
+  "devDependencies": {
+    "@brad-frost-web/bfw-process": "0.25.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

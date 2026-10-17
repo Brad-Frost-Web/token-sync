@@ -1,0 +1,8 @@
+{
+  "name": "@brad-frost-web/token-sync-bookmarklet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Builds a bookmarklet that turns any page into an applier.",
+  "type": "module",
+  "license": "MIT"
+}

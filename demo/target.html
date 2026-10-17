@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- eddie-template: ed-p-grid — a listing page standing in for "any website": cards, buttons and a page background for the tokens to land on -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync — target</title>
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/core/css/base.css" />
+    <script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script>
+    <!-- The whole integration: one script tag. Inert unless the URL says ?token-sync=<room>. -->
+    <script type="module" src="../packages/script/src/token-sync.js"></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container>
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Workshops at the Accra Makers Studio</h1></ed-heading>
+              A stand-in for any website. Its tokens follow room “demo” while this tab carries ?token-sync=demo.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Sync status</ed-heading>
+              <ed-text-passage slot="header">
+                <p id="latency" role="status">Waiting for a token change.</p>
+              </ed-text-passage>
+              <ed-grid variant="3up">
+                <ed-grid-item>
+                  <ed-card>
+                    <ed-heading tagName="h3">Kente weaving basics</ed-heading>
+                    <ed-text-passage><p>Two Saturday mornings with Ama Owusu, from warp to first strip.</p></ed-text-passage>
+                    <ed-button slot="footer" variant="primary" text="Reserve a loom"></ed-button>
+                  </ed-card>
+                </ed-grid-item>
+                <ed-grid-item>
+                  <ed-card>
+                    <ed-heading tagName="h3">Hand-built ceramics</ed-heading>
+                    <ed-text-passage><p>Coil and slab work with Kwame Mensah. Clay and firing included.</p></ed-text-passage>
+                    <ed-button slot="footer" variant="primary" text="Join the waitlist"></ed-button>
+                  </ed-card>
+                </ed-grid-item>
+                <ed-grid-item>
+                  <ed-card>
+                    <ed-heading tagName="h3">Bookbinding in an afternoon</ed-heading>
+                    <ed-text-passage><p>Sew a notebook with Priya Raman, then take it home.</p></ed-text-passage>
+                    <ed-button slot="footer" variant="primary" text="Book a seat"></ed-button>
+                  </ed-card>
+                </ed-grid-item>
+              </ed-grid>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+
+    <script type="module">
+      // Demo instrumentation: how long from the channel stamping a change to
+      // this tab applying it. Both clocks are this machine's, so the gap is real.
+      const latency = document.getElementById('latency');
+      window.tokenSyncLatencies = [];
+      document.addEventListener('token-sync:apply', ({ detail }) => {
+        const count = `${detail.changed.length} token change${detail.changed.length === 1 ? '' : 's'}`;
+        if (detail.latencyMs === null) {
+          latency.textContent = `Caught up with the room: ${count}.`;
+
+          return;
+        }
+        window.tokenSyncLatencies.push(detail.latencyMs);
+        latency.textContent = `Applied ${count} ${detail.latencyMs} ms after it was sent.`;
+      });
+    </script>
+  </body>
+</html>

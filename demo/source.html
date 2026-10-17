@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- eddie-template: ed-p-form — the form-page shape without the site shell: this is a two-tab lab demo, not a site page -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync — source</title>
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@brad-frost-web/eddie-design-tokens@0.70.0/core/css/base.css" />
+    <script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Token Sync source</h1></ed-heading>
+              Change a token here and every tab in room “demo” on this machine follows, with no relay or server in between.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Tokens</ed-heading>
+              <ed-stack gap="field">
+                <ed-color-picker
+                  id="brand"
+                  label="Primary button color"
+                  name="--ed-theme-button-primary-color-background-default"
+                  allowCustom
+                  fieldNote="Sets --ed-theme-button-primary-color-background-default."
+                ></ed-color-picker>
+                <ed-color-picker
+                  id="background"
+                  label="Page background"
+                  name="--ed-theme-color-background-default"
+                  allowCustom
+                  fieldNote="Sets --ed-theme-color-background-default."
+                ></ed-color-picker>
+                <ed-text-field
+                  id="radius"
+                  label="Corner radius"
+                  name="--ed-theme-border-radius-md"
+                  fieldNote="Sets --ed-theme-border-radius-md. Any CSS length, such as 0, 4px or 1rem."
+                ></ed-text-field>
+              </ed-stack>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Room</ed-heading>
+              <ed-text-passage slot="header"><p id="status" role="status">Connecting…</p></ed-text-passage>
+              <ed-cluster gap="inline">
+                <ed-button
+                  variant="primary"
+                  href="target.html?token-sync=demo"
+                  target="_blank"
+                  text="Open the target page (opens in a new tab)"
+                ></ed-button>
+                <ed-button id="reset" text="Reset every tab"></ed-button>
+                <ed-button id="lock" text="Lock the room" pressed="false"></ed-button>
+              </ed-cluster>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+
+    <script type="module">
+      import { connect } from '../packages/client/src/index.js';
+      import { checkValue, inferType } from '../packages/protocol/src/index.js';
+
+      const status = document.getElementById('status');
+      const lockButton = document.getElementById('lock');
+      const say = (text) => (status.textContent = text);
+
+      const session = connect({
+        room: 'demo',
+        role: 'source',
+        // The label stays put; aria-pressed carries the state.
+        onChange: ({ locked }) => (lockButton.pressed = String(locked)),
+      });
+      window.tokenSyncSource = session;
+      say('Connected to room “demo”. Open the target page, then change a token.');
+
+      // Start each control at the value the theme already has.
+      const root = getComputedStyle(document.documentElement);
+      await customElements.whenDefined('ed-color-picker');
+      for (const id of ['brand', 'background', 'radius']) {
+        const field = document.getElementById(id);
+        field.value = root.getPropertyValue(field.getAttribute('name')).trim();
+      }
+
+      // Each field's own note, to put back once a refused value is corrected.
+      const notes = new Map(['brand', 'background', 'radius'].map((id) => [id, document.getElementById(id).fieldNote]));
+
+      function send(field, value, announce) {
+        const name = field.getAttribute('name');
+        const type = inferType(root.getPropertyValue(name));
+        const check = checkValue(value, type);
+        if (!check.ok) {
+          field.isError = true;
+          field.fieldNote = `Not sent: ${check.reason}.`;
+
+          return;
+        }
+        field.isError = false;
+        field.fieldNote = notes.get(field.id);
+        session.set({ [name]: value });
+        if (announce) say(`Sent ${name}: ${value}`);
+      }
+
+      for (const id of ['brand', 'background']) {
+        const picker = document.getElementById(id);
+        // `input` fires per tick while the colour is scrubbed; `change` when committed.
+        picker.addEventListener('input', (event) => event.detail?.value && send(picker, event.detail.value, false));
+        picker.addEventListener('change', (event) => event.detail?.value && send(picker, event.detail.value, true));
+      }
+
+      const radius = document.getElementById('radius');
+      radius.addEventListener('input', (event) => {
+        const value = event.composedPath()[0]?.value?.trim();
+        if (value) send(radius, value, false);
+      });
+      radius.addEventListener('change', () => say(`Sent --ed-theme-border-radius-md: ${radius.value}`));
+
+      document.getElementById('reset').addEventListener('click', () => {
+        session.reset();
+        say('Reset: every tab in the room is back to the theme.');
+      });
+      lockButton.addEventListener('click', () => {
+        if (session.locked) session.unlock();
+        else session.lock();
+        say(session.locked ? 'Locked: controllers can’t change tokens until you unlock.' : 'Unlocked.');
+      });
+    </script>
+  </body>
+</html>
