@@ -2,7 +2,7 @@
   "name": "@brad-frost-web/token-sync-relay",
   "version": "0.0.0",
   "private": true,
-  "description": "Cloudflare Worker + Durable Object per room, and a self-hostable Node reference relay.",
+  "description": "Token Sync rooms: one Cloudflare Durable Object per room, and a dependency-free Node reference relay. Both wrap src/room.js.",
   "type": "module",
   "license": "MIT"
 }

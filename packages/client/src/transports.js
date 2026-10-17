@@ -148,3 +148,103 @@ export function createBroadcastTransport({ room, clock = createClock(), getSnaps
     },
   };
 }
+
+/**
+ * A room on a relay, over WebSocket. The relay does what a local channel does
+ * for itself — stamps `ts`, answers joiners with snapshots — and also holds
+ * the presenter key and the lock, so this transport stamps nothing and
+ * enforces nothing: it carries frames.
+ *
+ * Sends made before the relay says welcome are queued, and the socket
+ * reconnects with backoff (rejoining picks the state back up from the
+ * relay's snapshot).
+ *
+ * @param {{
+ *   url: string,
+ *   presenterKey?: string,
+ *   WebSocketImpl?: typeof WebSocket,
+ *   onStatus?: (status: { state: 'connecting' | 'open' | 'closed', presenter: boolean }) => void,
+ *   onRelayError?: (message: string) => void,
+ *   maxQueue?: number,
+ * }} options `url` is the room's socket, e.g. wss://relay.example/rooms/detach/socket
+ */
+export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globalThis.WebSocket, onStatus = () => {}, onRelayError = () => {}, maxQueue = 100 }) {
+  if (typeof WebSocketImpl !== 'function') throw new Error('token-sync: WebSocket is not available here');
+  const listeners = new Set();
+  let queue = [];
+  let socket = null;
+  let welcomed = false;
+  let presenter = false;
+  let closedByUs = false;
+  let retry = 0;
+  let timer = null;
+
+  const status = (state) => onStatus({ state, presenter });
+
+  function open() {
+    welcomed = false;
+    status('connecting');
+    socket = new WebSocketImpl(url);
+    socket.addEventListener('open', () => {
+      retry = 0;
+      socket.send(JSON.stringify(presenterKey ? { kind: 'hello', key: presenterKey } : { kind: 'hello' }));
+    });
+    socket.addEventListener('message', (event) => {
+      let frame;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (frame?.kind === 'welcome') {
+        welcomed = true;
+        presenter = frame.presenter === true;
+        status('open');
+        const pending = queue;
+        queue = [];
+        for (const msg of pending) socket.send(JSON.stringify({ kind: 'msg', msg }));
+      } else if (frame?.kind === 'msg') {
+        for (const fn of listeners) fn(frame.msg);
+      } else if (frame?.kind === 'error') {
+        onRelayError(String(frame.error));
+      }
+    });
+    socket.addEventListener('close', () => {
+      welcomed = false;
+      status('closed');
+      if (closedByUs) return;
+      // 0.5 s, 1 s, 2 s … capped at 10 s.
+      const delay = Math.min(10000, 500 * 2 ** retry);
+      retry += 1;
+      timer = setTimeout(open, delay);
+    });
+  }
+  open();
+
+  return {
+    publish(msg) {
+      if (welcomed) socket.send(JSON.stringify({ kind: 'msg', msg }));
+      else {
+        queue.push(msg);
+        if (queue.length > maxQueue) queue.shift();
+      }
+
+      return msg;
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+
+      return () => listeners.delete(fn);
+    },
+    close() {
+      closedByUs = true;
+      clearTimeout(timer);
+      listeners.clear();
+      socket?.close();
+    },
+    /** Whether the relay accepted this connection's presenter key. */
+    get isPresenter() {
+      return presenter;
+    },
+  };
+}
