@@ -51,3 +51,21 @@ test('leaving the room takes the fonts back out', () => {
   fonts.remove();
   assert.equal(page.head.children.length, 0);
 });
+
+test('a common system family is never requested: the machine already has it', () => {
+  const page = fakePage();
+  const fonts = createFontLoader({ document: page.document });
+  assert.deepEqual(fonts.ensure('Georgia, "Times New Roman", Arial, serif'), []);
+  assert.equal(page.head.children.length, 0);
+});
+
+test('one family whatever its case, and at most eight families a session', () => {
+  const page = fakePage();
+  const fonts = createFontLoader({ document: page.document });
+  assert.deepEqual(fonts.ensure('"Fraunces"'), ['Fraunces']);
+  assert.deepEqual(fonts.ensure('"fraunces"'), []);
+  const many = ['Inter', 'Lora', 'Karla', 'Rubik', 'Manrope', 'Outfit', 'Sora', 'Urbanist', 'Epilogue'];
+  assert.deepEqual(fonts.ensure(many.join(', ')), many.slice(0, 7));
+  assert.deepEqual(fonts.ensure('"Epilogue"'), []);
+  assert.equal(page.head.children.length, 8);
+});

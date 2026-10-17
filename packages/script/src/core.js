@@ -133,6 +133,7 @@ export function start({
   // drop-in passes Eddie's on Eddie pages); otherwise tokens apply as sent.
   const readComputed = (name) => globalThis.getComputedStyle?.(document.documentElement)?.getPropertyValue(name) ?? '';
   const adapter = createAdapter?.({ readComputed, document }) ?? null;
+  const fonts = createFontLoader({ document });
   const applier = createApplier({
     root: document.documentElement,
     resolve: adapter?.resolve ?? null,
@@ -140,7 +141,11 @@ export function start({
     transition: (update, { cause }) => (sweepChanges || cause === 'hold' ? wipe(update) : update()),
     // Read after onChange below has recorded the newest message, whichever
     // order the two arrive in — so a damped change reports its real delay.
-    onApply: ({ changed, at, cause }) =>
+    onApply: ({ changed, at, cause }) => {
+      // A font-family token now naming a family this page doesn't have: fetch
+      // it from Google Fonts, for this preview only (spec §10 Q3). Read back
+      // what was written, so a refused value never causes a request.
+      for (const name of changed) if (/font-family/.test(name)) fonts.ensure(document.documentElement.style.getPropertyValue(name));
       queueMicrotask(() =>
         emit('token-sync:apply', {
           changed,
@@ -148,7 +153,8 @@ export function start({
           op: cause === 'hold' ? 'hold' : newest.op,
           latencyMs: cause === 'hold' || newest.op === 'snapshot' ? null : at - newest.ts,
         }),
-      ),
+      );
+    },
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
   const declared = document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content;
@@ -159,17 +165,13 @@ export function start({
     (relay
       ? createRemoteTransport({ url: relay, onRelayError: (message) => console.warn(`token-sync: the relay said: ${message}`) })
       : 'broadcast');
-  const fonts = createFontLoader({ document });
   const session = connect({
     room,
     transport: channel,
     role: 'controller',
     applier,
-    onChange: ({ message, props, changed }) => {
+    onChange: ({ message }) => {
       if (message.ts >= newest.ts) newest = { ts: message.ts, op: message.op };
-      // A font-family token naming a family this page doesn't have: fetch it
-      // from Google Fonts, for this preview only (spec §10 Q3).
-      for (const name of changed) if (/font-family/.test(name) && props[name]) fonts.ensure(props[name]);
     },
     onError: ({ errors }) => console.warn(`token-sync: dropped a message — ${errors.join('; ')}`),
   });
