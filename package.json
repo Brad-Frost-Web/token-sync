@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node demo/server.js",
     "relay": "node packages/relay/node/server.js",
+    "token-sync": "node packages/cli/bin/token-sync.js",
     "build": "node tools/build.js",
     "test": "node --test \"packages/*/test/*.test.js\" \"tools/test/*.test.js\"",
     "bfw:ship": "bfw-process verify-phase ship",

@@ -101,6 +101,25 @@ The remote is an Eddie page that joins the room as a controller. Anyone holding 
 - **One known gap:** Eddie's colour swatches and slider thumb are smaller than the spec's 44 px phone target. They meet WCAG 2.5.8's 24 px. That's filed upstream (#16, Brad-Frost-Web/eddie-design-system#2457) rather than patched over with custom CSS.
 
 Once Eddie's #2447 lands, the remote can host `ed-r-theme-customizer mode="controller"` instead.
+## From your token files: the CLI
+
+```bash
+npm run token-sync -- relay                                # a local relay, if you don't have one
+npm run token-sync -- watch dist/tokens.css                # send what changes in a built stylesheet
+npm run token-sync -- watch dist/tokens.css --build "npm run tokens" --src tokens/
+npm run token-sync -- poll https://codepen.io/<user>/pen/<id>.css   # follow a stylesheet you can't build
+```
+
+Run these from this repo, or call `node packages/cli/bin/token-sync.js` directly. Publishing it as an installable `token-sync` command is a later, separate decision.
+
+- **`watch`** reads the custom properties in a built stylesheet. On every save it sends only the ones that changed. With `--build` and `--src` (comma-separate several folders), saving a source file runs your own build first, whether that's Style Dictionary or anything else that writes the stylesheet. Token Sync doesn't depend on Style Dictionary. Builds never overlap, and changes in build output (`build/`, `dist/`, the stylesheet's own folder when it sits inside the source) never start one. So Eddie's theme folders, where the sources and `build/` live side by side, can't loop. For Eddie: `npm run token-sync -- watch packages/eddie-design-tokens/bfw/build/css/tokens.css --build "npm run eddie-design-tokens:build:tokens" --src packages/eddie-design-tokens/bfw`.
+- **`poll`** does the same for a stylesheet at a URL, every `--interval` milliseconds (2000 by default): a CodePen, or a deploy preview (`--header "Authorization: …"` for a protected one). One fetch runs at a time.
+- Both talk to a relay (`--relay`, default `http://127.0.0.1:8787`). Without `--room` they create one and print its code and presenter key; open the target page in that room.
+- Only properties a stylesheet always defines are sent: anything inside `@media`, `@supports` or `@container` is left out, because one value goes to every page. `!important` is read as the declaration's priority, not part of the value.
+- `--selector ":root"` keeps only blocks whose selector list includes that selector, for a stylesheet that defines several themes.
+- Changes are split into messages the relay accepts, by count and by size, so a full Eddie theme (612 properties) goes through.
+- `--send-initial` sends every property once at start.
+- A value the protocol refuses is not sent, and the CLI says why. A property that disappears from the stylesheet can't be un-set over the wire, so pages keep its last value; the CLI says that too.
 
 ## The protocol: `token-sync/1`
 
@@ -139,7 +158,7 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | Built, not deployed |
 | `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
 | `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
-| `cli` | `token-sync watch` and `token-sync poll` | [#5](https://github.com/Brad-Frost-Web/token-sync/issues/5), [#6](https://github.com/Brad-Frost-Web/token-sync/issues/6) |
+| `cli` | `token-sync watch`, `poll` and `relay` | Built |
 | `remote` | The phone remote | Built (interim, until Eddie #2447) |
 
 Also built: the before/after wipe and hold-to-compare key (`packages/client/src/wipe.js`). Planned: Google Fonts sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)).
