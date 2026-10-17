@@ -4,6 +4,9 @@
 // --remote-debugging-pipe and --enable-unsafe-extension-debugging), because
 // branded Chrome no longer honours --load-extension. Checks the extension
 // loads, its background service worker starts, and the popup renders Eddie.
+// Then, on a page that loads Eddie, it runs the content script's notifier in
+// an isolated world — where a content script runs, and customElements is
+// null — and checks the toast it makes upgrades with the page's ed-toast (#26).
 // Set CHROME to point at a different browser binary, and SMOKE_SCREENSHOT=<file.png>
 // to save a picture of the popup.
 
@@ -11,7 +14,14 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { buildExtension } from './build.js';
+import { createNotifier } from '../script/src/eddie.js';
+
+/** A page wearing Eddie, as a site the extension would preview. */
+const EDDIE_PAGE = `<!doctype html><html lang="en" class="bfw"><head><meta charset="utf-8"><title>Eddie page</title>
+<script type="module" src="https://unpkg.com/@brad-frost-web/eddie-web-components@0.70.0/cdn/eddie.js"></script></head>
+<body><main><p>An Eddie page.</p></main></body></html>`;
 
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
@@ -83,7 +93,9 @@ export async function smoke() {
       writeFileSync(process.env.SMOKE_SCREENSHOT, Buffer.from(data, 'base64'));
     }
 
-    return { id, workerStarted: Boolean(worker), popup };
+    const toast = await toastInIsolatedWorld(send, sleep);
+
+    return { id, workerStarted: Boolean(worker), popup, toast };
   } finally {
     // Chrome keeps writing to its profile until it has really exited.
     const exited = new Promise((resolve) => chrome.once('exit', resolve));
@@ -93,10 +105,56 @@ export async function smoke() {
   }
 }
 
+/**
+ * The notifier, run where a content script runs. Chrome's isolated world shares
+ * the DOM with the page but not its JavaScript, so window.customElements is
+ * null there; an <ed-toast> created there must still upgrade.
+ */
+async function toastInIsolatedWorld(send, sleep) {
+  const server = createServer((_, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(EDDIE_PAGE));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { targetId } = await send('Target.createTarget', { url: `http://127.0.0.1:${server.address().port}/` });
+    const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    let defined = false;
+    for (let i = 0; i < 100 && !defined; i += 1) {
+      const { result } = await send('Runtime.evaluate', { expression: `!!customElements.get('ed-toast')`, returnByValue: true }, sessionId);
+      defined = result.value === true;
+      if (!defined) await sleep(100);
+    }
+    if (!defined) return { pageDefinesToast: false };
+    const { frameTree } = await send('Page.getFrameTree', {}, sessionId);
+    const { executionContextId } = await send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: 'token-sync-smoke' }, sessionId);
+    const notify = `(${createNotifier.toString()})(document)`;
+    const { result } = await send(
+      'Runtime.evaluate',
+      {
+        contextId: executionContextId,
+        expression: `(() => {
+          const isolated = globalThis.customElements == null;
+          ${notify}({ moved: ['Nudged content brand 36% darker to stay readable.'], problems: [], unchecked: 0 });
+          const toast = document.querySelector('ed-toast');
+          return JSON.stringify({ isolated, shown: !!toast, upgraded: !!toast?.shadowRoot, text: toast?.textContent.trim() ?? null });
+        })()`,
+        returnByValue: true,
+      },
+      sessionId,
+    );
+
+    return { pageDefinesToast: true, ...JSON.parse(result.value) };
+  } finally {
+    server.close();
+  }
+}
+
 if (process.argv[1]?.endsWith('smoke.js')) {
   const result = await smoke();
   console.log(JSON.stringify(result, null, 2));
-  const ok = result.workerStarted && result.popup?.eddie;
-  if (!ok) console.error(result.workerStarted ? 'The popup did not render Eddie.' : 'The background service worker never started.');
+  const toastOk = result.toast?.shown && result.toast?.upgraded;
+  const ok = result.workerStarted && result.popup?.eddie && toastOk;
+  if (!result.workerStarted) console.error('The background service worker never started.');
+  else if (!result.popup?.eddie) console.error('The popup did not render Eddie.');
+  else if (!result.toast?.pageDefinesToast) console.error('The Eddie test page never defined ed-toast (is unpkg reachable?).');
+  else if (!toastOk) console.error('The notifier, run in an isolated world, did not show an upgraded ed-toast.');
   process.exit(ok ? 0 : 1);
 }
