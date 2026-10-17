@@ -77,6 +77,11 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     await chrome.scripting.executeScript({ target: { tabId }, files: [contentScript] });
   }
 
+  /** Re-apply after navigation or a background restart; a refusal here just means this page can't be previewed. */
+  async function reinject(tabId) {
+    await inject(tabId).catch(() => {});
+  }
+
   async function stop() {
     broadcast({ kind: 'stop' });
     ports.clear();
@@ -96,10 +101,36 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     if (!(await chrome.permissions.contains({ origins: [permissionFor(site)] }))) throw new Error(`no permission for ${site}`);
     if (session) await stop(); // one tab at a time
     session = { tabId, room, relay };
+    connectRelay();
+    try {
+      await inject(tabId);
+    } catch (error) {
+      // The browser refused (a store page, an error page, a PDF): leave no
+      // half-started session or allowed site behind.
+      await stop();
+      throw new Error(`the browser won't let extensions run on this page (${error.message})`);
+    }
     await chrome.storage.session.set({ [SESSION_KEY]: session });
     await saveLists(allow(await lists(), room, site));
-    connectRelay();
-    await inject(tabId);
+  }
+
+  /** A sync waiting on the permission prompt; finished by onPermissionsAdded even if the popup closed. */
+  let pending = null;
+
+  async function requestSync(request) {
+    const site = siteOf(request.url);
+    if (site && (await chrome.permissions.contains({ origins: [permissionFor(site)] }))) return sync(request);
+    pending = { ...request, site };
+
+    return { pending: true };
+  }
+
+  async function onPermissionsAdded({ origins = [] }) {
+    if (pending && origins.includes(permissionFor(pending.site))) {
+      const request = pending;
+      pending = null;
+      await sync(request).catch((error) => (status = { ...status, error: error.message }));
+    }
   }
 
   async function onPortConnect(port) {
@@ -112,6 +143,8 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     }
     ports.add(port);
     port.onDisconnect.addListener(() => ports.delete(port));
+    // Heartbeats from the page are what keep this background alive; nothing to do with them.
+    port.onMessage?.addListener?.(() => {});
     port.postMessage({ kind: 'config', room: session.room });
     for (const msg of state.snapshotMessages(session.room)) port.postMessage({ kind: 'msg', msg });
   }
@@ -122,38 +155,60 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     const site = siteOf(tab?.url ?? '');
     if (!site || !isAllowed(await lists(), session.room, tab.url)) return;
     if (!(await chrome.permissions.contains({ origins: [permissionFor(site)] }))) return;
-    await inject(tabId);
+    await reinject(tabId);
   }
 
   async function onTabRemoved(tabId) {
     if (session && tabId === session.tabId) await stop();
   }
 
-  /** After the browser restarted the background, pick the session back up. */
+  /**
+   * After the browser restarted the background, pick the session back up and
+   * bring the room back to the synced tab (its page reverted when the old
+   * background went away, unless it reconnected by itself).
+   */
   async function restore() {
     const saved = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY];
     if (saved && !session) {
       session = saved;
       connectRelay();
+      const tab = await chrome.tabs?.get?.(session.tabId).catch(() => null);
+      if (tab?.url && isAllowed(await lists(), session.room, tab.url) && (await chrome.permissions.contains({ origins: [permissionFor(siteOf(tab.url))] }))) {
+        await reinject(session.tabId);
+      }
     }
   }
 
-  /** Requests from the popup. */
-  async function onMessage(request) {
+  /**
+   * Requests from the popup. Only the extension's own popup page may make
+   * them, not a content script running in some page (opened as a tab, the
+   * popup also has a tab, so the page URL is what tells them apart).
+   */
+  async function onMessage(request, sender = {}) {
+    const popup = chrome.runtime?.getURL?.('popup.html');
+    if (sender.tab && !(popup && sender.url?.startsWith(popup))) throw new Error('requests come from the popup');
     switch (request?.type) {
       case 'status':
         return { session, status, lists: await lists() };
       case 'sync':
-        await sync(request);
-
-        return { ok: true };
+        return (await requestSync(request)) ?? { ok: true };
       case 'stop':
         await stop();
 
         return { ok: true };
       case 'forget-site': {
-        await saveLists(disallow(await lists(), request.room, request.site));
-        await chrome.permissions.remove({ origins: [permissionFor(request.site)] }).catch(() => {});
+        const next = disallow(await lists(), request.room, request.site);
+        await saveLists(next);
+        // The browser's permission is per site, not per room: give it back
+        // only when no other room still lists the site.
+        if (!Object.values(next).some((sites) => sites.includes(request.site))) {
+          await chrome.permissions.remove({ origins: [permissionFor(request.site)] }).catch(() => {});
+        }
+        // Forgetting the site you're previewing stops the preview.
+        if (session?.room === request.room) {
+          const tab = await chrome.tabs?.get?.(session.tabId).catch(() => null);
+          if (tab?.url && siteOf(tab.url) === request.site) await stop();
+        }
 
         return { ok: true };
       }
@@ -162,7 +217,17 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
     }
   }
 
-  return { sync, stop, restore, onMessage, onPortConnect, onTabUpdated, onTabRemoved, get session() {
-    return session;
-  } };
+  return {
+    sync,
+    stop,
+    restore,
+    onMessage,
+    onPortConnect,
+    onTabUpdated,
+    onTabRemoved,
+    onPermissionsAdded,
+    get session() {
+      return session;
+    },
+  };
 }

@@ -85,13 +85,18 @@ export async function smoke() {
 
     return { id, workerStarted: Boolean(worker), popup };
   } finally {
+    // Chrome keeps writing to its profile until it has really exited.
+    const exited = new Promise((resolve) => chrome.once('exit', resolve));
     chrome.kill();
-    rmSync(profile, { recursive: true, force: true });
+    await exited;
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 
 if (process.argv[1]?.endsWith('smoke.js')) {
   const result = await smoke();
   console.log(JSON.stringify(result, null, 2));
-  process.exit(result.workerStarted && result.popup?.eddie ? 0 : 1);
+  const ok = result.workerStarted && result.popup?.eddie;
+  if (!ok) console.error(result.workerStarted ? 'The popup did not render Eddie.' : 'The background service worker never started.');
+  process.exit(ok ? 0 : 1);
 }

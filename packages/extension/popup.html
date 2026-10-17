@@ -24,14 +24,16 @@
             <ed-section align="left">
               <ed-heading slot="header" tagName="h2">This tab</ed-heading>
               <ed-text-passage slot="header"><p id="status" role="status">Checking this tab…</p></ed-text-passage>
+              <form id="form">
               <ed-stack gap="field">
-                <ed-text-field id="room" label="Room code" name="room" autocomplete="off" fieldNote="The code the presenter shared, like detach or a2b3c4."></ed-text-field>
+                <ed-text-field id="room" label="Room code" name="room" fieldNote="The code the presenter shared, like detach or a2b3c4."></ed-text-field>
                 <ed-text-field id="relay" label="Relay" name="relay" type="url" value="http://127.0.0.1:8787" fieldNote="Where the room lives. npm run relay starts one on this machine."></ed-text-field>
                 <ed-cluster gap="inline">
-                  <ed-button id="sync" variant="primary" text="Preview this tab in the room"></ed-button>
+                  <ed-button id="sync" type="submit" variant="primary" text="Preview this tab in the room"></ed-button>
                   <ed-button id="stop" text="Stop previewing" disabled></ed-button>
                 </ed-cluster>
               </ed-stack>
+              </form>
             </ed-section>
 
             <ed-section align="left">

@@ -53,11 +53,14 @@ For sites you can't add a script to and where a bookmarklet is blocked, there's 
 npm run build:extension   # writes dist/extension/
 ```
 
-Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **Load unpacked**, or in Firefox `about:debugging` → **Load Temporary Add-on**. Open the popup on the tab you want, enter a room code and relay, and choose **Preview this tab in the room**.
+Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **Load unpacked**. Open the popup on the tab you want, enter a room code and relay, and choose **Preview this tab in the room**.
 
+**Tested in Chrome. Built for Firefox, but not yet tried there.** The manifest carries what Firefox 128+ needs (`background.scripts`, a gecko id), and the popup asks for permission the way Firefox requires. To try it: `about:debugging` → This Firefox → **Load Temporary Add-on** → `dist/extension/manifest.json`.
+
+- **Rooms live on a relay.** The extension joins rooms on a relay, so the room can hold phones and other machines. A room that lives inside the extension and spans tabs on different sites with no network (FEATURE-SPEC Flow B) is #20.
 - **One tab at a time.** Previewing another tab stops the first, and its page goes back to how it was.
 - **Only sites you allow.** The first preview on a site asks the browser for permission for that one site (no blanket "all sites" grant). The site joins the room's allowed list, and as the tab moves between allowed sites the room comes back on every page. The popup lists the allowed sites, and removing one also gives back its permission.
-- **The background holds the relay connection**, so a page's Content Security Policy can't block it. The page runs only the applier, with the same guardrails as the drop-in, including hold <kbd>\</kbd> to compare.
+- **The background holds the relay connection**, so a page's Content Security Policy can't block it. The synced page sends a heartbeat that keeps the background awake. If the browser stops the background anyway, the page reconnects, and the restarted background replays the room. The page runs only the applier, with the same guardrails as the drop-in, including hold <kbd>\</kbd> to compare.
 - **The popup is built from Eddie**, bundled in from the pinned packages, because MV3 forbids remote code.
 
 `npm run extension:smoke` loads the built extension into real Chrome over the DevTools protocol. It checks that the extension loads, its service worker starts, and the popup renders Eddie.

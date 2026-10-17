@@ -20,9 +20,18 @@ function fakeChrome({ granted = ['https://bradfrost.com/*'] } = {}) {
       contains: async ({ origins }) => origins.every((o) => granted.includes(o)),
       remove: async ({ origins }) => origins.forEach((o) => granted.splice(granted.indexOf(o), 1)),
     },
-    scripting: { executeScript: async ({ target }) => injected.push(target.tabId) },
+    scripting: {
+      executeScript: async ({ target }) => {
+        if (target.tabId === 666) throw new Error('Cannot access contents of the page');
+        injected.push(target.tabId);
+      },
+    },
+    tabs: { get: async (tabId) => ({ id: tabId, url: tabs[tabId] }) },
+    runtime: { getURL: (path) => `chrome-extension://abc/${path}` },
+    grant: (origin) => granted.push(origin),
   };
 }
+const tabs = { 7: 'https://bradfrost.com/blog', 1: 'https://bradfrost.com/', 2: 'https://atomicdesign.bradfrost.com/' };
 
 /** A relay connection the test drives by hand. */
 function fakeTransport() {
@@ -156,4 +165,60 @@ test('a restarted background picks the session back up', async () => {
   await revived.restore();
   assert.equal(revived.session.room, 'detach');
   assert.equal(relay.made.length, 1);
+});
+
+test('if the browser refuses to run on the page, nothing is left half-started', async () => {
+  const chrome = fakeChrome();
+  const relay = fakeTransport();
+  const hub = createHub({ chrome, createTransport: relay.create });
+  await assert.rejects(hub.sync({ tabId: 666, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' }), /won't let extensions run/);
+  assert.equal(hub.session, null);
+  assert.equal(relay.made[0].closed, true);
+  assert.equal(chrome.local['token-sync:allowlists'], undefined);
+});
+
+test('a sync waiting on the permission prompt finishes when the permission arrives, popup or no popup', async () => {
+  const chrome = fakeChrome({ granted: [] });
+  const hub = createHub({ chrome, createTransport: fakeTransport().create });
+  const reply = await hub.onMessage({ type: 'sync', tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  assert.deepEqual(reply, { pending: true });
+  assert.equal(hub.session, null);
+  chrome.grant('https://bradfrost.com/*');
+  await hub.onPermissionsAdded({ origins: ['https://bradfrost.com/*'] });
+  assert.equal(hub.session.room, 'detach');
+  assert.deepEqual(chrome.injected, [7]);
+});
+
+test('forgetting a site keeps its permission while another room still lists it', async () => {
+  const chrome = fakeChrome();
+  const hub = createHub({ chrome, createTransport: fakeTransport().create });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'studio', relay: 'https://r.example' });
+  await hub.onMessage({ type: 'forget-site', room: 'detach', site: 'https://bradfrost.com' });
+  assert.equal(await chrome.permissions.contains({ origins: ['https://bradfrost.com/*'] }), true);
+  assert.equal(hub.session.room, 'studio'); // a different room's preview carries on
+});
+
+test('forgetting the site being previewed stops the preview', async () => {
+  const hub = createHub({ chrome: fakeChrome(), createTransport: fakeTransport().create });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  await hub.onMessage({ type: 'forget-site', room: 'detach', site: 'https://bradfrost.com' });
+  assert.equal(hub.session, null);
+});
+
+test('content scripts cannot make popup requests', async () => {
+  const hub = createHub({ chrome: fakeChrome(), createTransport: fakeTransport().create });
+  await assert.rejects(hub.onMessage({ type: 'stop' }, { tab: { id: 7 }, url: 'https://bradfrost.com/' }), /come from the popup/);
+  // The popup page opened in a tab is still the popup.
+  assert.deepEqual(await hub.onMessage({ type: 'stop' }, { tab: { id: 9 }, url: 'chrome-extension://abc/popup.html' }), { ok: true });
+});
+
+test('a restarted background brings the room back to the synced tab', async () => {
+  const chrome = fakeChrome();
+  const first = createHub({ chrome, createTransport: fakeTransport().create });
+  await first.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  chrome.injected.length = 0;
+  const revived = createHub({ chrome, createTransport: fakeTransport().create });
+  await revived.restore();
+  assert.deepEqual(chrome.injected, [7]);
 });

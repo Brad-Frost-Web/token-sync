@@ -9,12 +9,18 @@
 import { connect, createApplier, createWipe, holdToCompare } from '../../client/src/index.js';
 import { PORT_NAME } from './constants.js';
 
-export function startContent({ chrome = globalThis.chrome, document = globalThis.document, window = globalThis.window } = {}) {
+const HEARTBEAT_MS = 20000;
+const RECONNECT_ATTEMPTS = 5;
+
+export function startContent({ chrome = globalThis.chrome, document = globalThis.document, window = globalThis.window, timers = globalThis } = {}) {
   if (globalThis.tokenSyncExtension) return globalThis.tokenSyncExtension;
-  const port = chrome.runtime.connect({ name: PORT_NAME });
   const listeners = new Set();
   let session = null;
   let stopComparing = () => {};
+  let port = null;
+  let heartbeat = null;
+  let stopped = false;
+  let attempts = 0;
 
   const wipe = createWipe({ document });
   const applier = createApplier({
@@ -24,6 +30,8 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
   });
 
   function leave() {
+    stopped = true;
+    timers.clearInterval(heartbeat);
     stopComparing();
     session?.close();
     session = null;
@@ -31,7 +39,31 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
     globalThis.tokenSyncExtension = null;
   }
 
-  port.onMessage.addListener((frame) => {
+  function open() {
+    port = chrome.runtime.connect({ name: PORT_NAME });
+    port.onMessage.addListener(onFrame);
+    // The background went away. If it was stopped for being idle it comes
+    // back on the next connect, and replays the room: try a few times before
+    // putting the page back.
+    port.onDisconnect.addListener(() => {
+      timers.clearInterval(heartbeat);
+      if (stopped) return;
+      attempts += 1;
+      if (attempts > RECONNECT_ATTEMPTS) leave();
+      else timers.setTimeout(open, 250 * attempts);
+    });
+    // Messages on the port keep the background alive while this tab is synced.
+    heartbeat = timers.setInterval(() => {
+      try {
+        port.postMessage({ kind: 'beat' });
+      } catch {
+        // The disconnect handler deals with it.
+      }
+    }, HEARTBEAT_MS);
+  }
+
+  function onFrame(frame) {
+    attempts = 0;
     if (frame?.kind === 'config' && !session) {
       session = connect({
         room: frame.room,
@@ -56,10 +88,9 @@ export function startContent({ chrome = globalThis.chrome, document = globalThis
       leave();
       port.disconnect();
     }
-  });
-  // The background stopped or went away: put the page back as it was.
-  port.onDisconnect.addListener(leave);
+  }
 
+  open();
   globalThis.tokenSyncExtension = { leave };
 
   return globalThis.tokenSyncExtension;
