@@ -50,6 +50,9 @@
             <ed-section align="left">
               <ed-heading slot="header" tagName="h2">Room</ed-heading>
               <ed-text-passage slot="header"><p id="status" role="status">Connecting…</p></ed-text-passage>
+              <ed-text-passage id="remote" hidden>
+                <p>Phone remote for this room: <a id="remote-link" href="#">open the remote</a>. Share this link with the audience.</p>
+              </ed-text-passage>
               <ed-cluster gap="inline">
                 <ed-button
                   variant="primary"
@@ -91,6 +94,10 @@
           onRelayError: (message) => say(`The relay refused that: ${message}`),
         });
         document.querySelector('ed-button[target="_blank"]').href = `target.html?token-sync=${room}&relay=${encodeURIComponent(relay)}`;
+        const remoteHref = new URL('../packages/remote/index.html', location.href);
+        remoteHref.search = new URLSearchParams({ room, relay }).toString();
+        document.getElementById('remote-link').href = remoteHref.href;
+        document.getElementById('remote').hidden = false;
       }
       const session = connect({
         room,
