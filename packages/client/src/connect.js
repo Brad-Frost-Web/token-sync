@@ -39,6 +39,7 @@ function pageWears(scope) {
 export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {}, keyFor = null, inScope = pageWears }) {
   if (!isRoom(room)) throw new Error(`token-sync: "${room}" is not a valid room code`);
   const state = createRoomState();
+  const warnedScopes = new Set();
   const getSnapshot = (options) => state.snapshotMessages(room, options);
 
   const channel =
@@ -64,15 +65,28 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
     if (message.room !== room) return;
     // A request for the room's state: the transport or the relay answers it.
     if (isSnapshotRequest(message)) return;
+    const before = state.props(inScope);
     const outcome = state.apply(message);
     if (!outcome.applied) return;
     const shown = state.props(inScope);
+    // Only what this page shows counts as changed here: an edit for another
+    // theme is kept, for answering, but changes nothing on this page.
+    const changed = outcome.changed.filter((key) => before[key] !== shown[key]);
+    if (!changed.length && (message.op === 'set' || message.op === 'snapshot')) {
+      if (message.scope && message.scope !== '*' && !inScope(message.scope.toLowerCase()) && !warnedScopes.has(message.scope)) {
+        warnedScopes.add(message.scope);
+        console.info(`token-sync: not showing edits for the "${message.scope}" theme; this page doesn't wear it (<html class="${message.scope}">).`);
+      }
+
+      return;
+    }
     applier?.render(shown);
-    onChange({ props: shown, changed: outcome.changed, message, locked: state.locked });
+    onChange({ props: shown, changed, message, locked: state.locked });
   });
 
   // A page that switches theme mid-session shows that theme's edits at once,
-  // not at the next message.
+  // not at the next message. This repaints only: onChange hears the next
+  // message. A custom inScope has to re-render its own way.
   const html = inScope === pageWears ? globalThis.document?.documentElement : null;
   const themeWatch =
     applier && html && typeof globalThis.MutationObserver === 'function'

@@ -19,7 +19,8 @@ import { createMessage } from './message.js';
 
 /** Absent and `*` both mean every theme. */
 const ALL = '*';
-const scopeOf = (scope) => (typeof scope === 'string' && scope ? scope : ALL);
+// Theme ids are matched without case, as <html> classes are written: lowercase.
+const scopeOf = (scope) => (typeof scope === 'string' && scope ? scope.toLowerCase() : ALL);
 const idOf = (scope, key) => `${scope}\n${key}`;
 
 /**
@@ -42,14 +43,30 @@ export function createRoomState() {
    * older write that arrives late can't bring the token back.
    * `fillOnly` merges only keys this state has never heard of.
    */
+  /**
+   * Whether a fill-only answer for (scope, key) would repaint something a page
+   * already shows — Eddie's display skips any key it knows, and it knows only
+   * what is in its scope. An answer for one theme yields to an unscoped entry
+   * or one for that theme; an unscoped answer yields to any entry for the key,
+   * because it is in scope everywhere. (The cost: a page on bfw that heard
+   * only a southleft edit to a key gets no unscoped fill for it.)
+   */
+  function knows(key, scope) {
+    if (entries.has(idOf(ALL, key)) || entries.has(idOf(scope, key))) return true;
+    if (scope !== ALL) return false;
+    for (const entry of entries.values()) if (entry.key === key) return true;
+
+    return false;
+  }
+
   function merge(props, ts, { fillOnly = false, scope = ALL } = {}) {
     const changed = [];
     for (const [key, value] of Object.entries(props)) {
       const id = idOf(scope, key);
       const current = entries.get(id);
-      if (fillOnly && current) continue;
+      if (fillOnly && knows(key, scope)) continue;
       if (!current || ts > current.ts || (ts === current.ts && String(value) > String(current.value))) {
-        if (!current || current.value !== value) changed.push(key);
+        if ((!current || current.value !== value) && !changed.includes(key)) changed.push(key);
         entries.set(id, { key, scope, value, ts });
       }
     }
@@ -74,6 +91,8 @@ export function createRoomState() {
       return { applied: true, changed: merge(msg.props ?? {}, ts, { scope: scopeOf(msg.scope) }) };
     }
 
+    // A reset clears every theme, whatever scope it carries — as Eddie's
+    // display does, which handles reset before it looks at scope.
     if (op === 'reset') {
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
       resetTs = ts;
@@ -81,7 +100,7 @@ export function createRoomState() {
       for (const [id, entry] of entries) {
         if (entry.ts <= ts) {
           entries.delete(id);
-          changed.push(entry.key);
+          if (!changed.includes(entry.key)) changed.push(entry.key);
         }
       }
 

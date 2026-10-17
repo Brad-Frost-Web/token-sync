@@ -22,6 +22,8 @@
 //   --room <code>      the room to send to (default: create one on the relay)
 //   --key <key>        that room's presenter key (not needed to send changes)
 //   --selector <sel>   only properties declared under this selector, e.g. ":root"
+//   --scope <theme>    the theme these edits are for (e.g. southleft), so pages
+//                      wearing another theme ignore them; default every theme
 //   --send-initial     send every property once at start, not only changes
 
 import { spawn } from 'node:child_process';
@@ -30,7 +32,7 @@ import { watch } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connect, createRemoteTransport } from '../../client/src/index.js';
-import { checkSafety, isPropKey } from '../../protocol/src/index.js';
+import { checkSafety, isPropKey, MAX_PROPS } from '../../protocol/src/index.js';
 import { MAX_FRAME_LENGTH } from '../../relay/src/room.js';
 import { createRelayServer } from '../../relay/node/server.js';
 import { diffTokens, tokensFrom } from '../src/css.js';
@@ -40,7 +42,8 @@ const FLAGS = new Set(['send-initial']);
 const IGNORED_DIRS = new Set(['build', 'dist', 'node_modules', '.git']);
 /** Room for the frame's envelope (kind, room, op, from) around the props. */
 const FRAME_BUDGET = MAX_FRAME_LENGTH - 512;
-const MAX_PROPS_PER_MESSAGE = 500;
+/** The protocol's own cap; a bigger message is refused whole. */
+const MAX_PROPS_PER_MESSAGE = MAX_PROPS;
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -66,6 +69,14 @@ export function parseArgs(argv) {
   }
 
   return { command, options };
+}
+
+/** --scope, checked: a theme id, or undefined for every theme. */
+function themeScope(options) {
+  const scope = text(options.scope, 'scope');
+  if (scope !== undefined && !/^(\*|[a-z0-9][a-z0-9-]{0,63})$/i.test(scope)) fail('--scope must be a theme id (letters, digits, -) or *');
+
+  return scope?.toLowerCase();
 }
 
 const log = (message) => console.log(`token-sync: ${message}`);
@@ -148,7 +159,7 @@ export function chunk(room, entries) {
  * Returns false if a send failed, so the caller keeps its old baseline and
  * the change is tried again next time rather than lost.
  */
-function sendChanges(session, changed, removed) {
+export function sendChanges(session, changed, removed, scope) {
   const entries = [];
   for (const [name, value] of Object.entries(changed)) {
     if (!isPropKey(name)) {
@@ -159,10 +170,11 @@ function sendChanges(session, changed, removed) {
     if (check.ok) entries.push([name, value]);
     else log(`not sending ${name}: ${check.reason}`);
   }
-  for (const name of removed) log(`${name} was removed; tokens can't be un-set over the wire, so pages keep its last value`);
+  // A property gone from the stylesheet is cleared on every page (null).
+  for (const name of removed) if (isPropKey(name)) entries.push([name, null]);
   if (!entries.length) return true;
   try {
-    for (const props of chunk(session.room, entries)) session.set(props);
+    for (const props of chunk(session.room, entries)) session.set(props, { scope });
   } catch (error) {
     log(`couldn't send: ${error.message}`);
 
@@ -233,13 +245,13 @@ export function startsBuild(root, path, target) {
 }
 
 /** Follow a token source: compare each read with the last good one, and send what changed. */
-function follower(session, read, describe) {
+function follower(session, read, describe, scope) {
   let current = null;
 
   return {
     async start(sendInitial) {
       current = await read();
-      if (sendInitial) sendChanges(session, current, []);
+      if (sendInitial) sendChanges(session, current, [], scope);
     },
     async update() {
       let next;
@@ -253,7 +265,7 @@ function follower(session, read, describe) {
       // A stylesheet caught half-written reads as nearly empty; don't treat that as every token being deleted.
       if (Object.keys(next).length === 0 && Object.keys(current ?? {}).length > 0) return;
       const { changed, removed } = diffTokens(current ?? {}, next);
-      if (sendChanges(session, changed, removed)) current = next;
+      if (sendChanges(session, changed, removed, scope)) current = next;
     },
   };
 }
@@ -270,7 +282,7 @@ async function watchCommand(options) {
   const read = async () => tokensFrom(await readFile(target, 'utf8'), { selector });
 
   const session = await joinRoom(options);
-  const follow = follower(session, read, file);
+  const follow = follower(session, read, file, themeScope(options));
   await follow.start(options['send-initial']).catch((error) => fail(`couldn't read ${file}: ${error.message}`));
   const update = serial(() => follow.update());
   // Editors replace files rather than writing them in place, so watch the folder.
@@ -313,7 +325,7 @@ async function pollCommand(options) {
   };
 
   const session = await joinRoom(options);
-  const follow = follower(session, read, url);
+  const follow = follower(session, read, url, themeScope(options));
   await follow.start(options['send-initial']).catch((error) => fail(`couldn't fetch ${url}: ${error.message}`));
   log(`polling ${url} every ${interval} ms`);
   // One fetch at a time: the next starts only after this one is done, so an

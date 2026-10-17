@@ -126,3 +126,17 @@ test("scope, as Eddie's displays read it: a lab page wearing bfw ignores a south
   const pink = heard.find((m) => m.props?.['--ed-theme-color-background-brand']);
   assert.equal(pink?.scope, 'southleft');
 });
+
+test("an edit for another theme isn't reported as a change on this page", async (t) => {
+  const changes = [];
+  const lab = connect({ room: 'ix-quiet', inScope: (scope) => scope === 'bfw', onChange: ({ changed }) => changes.push(changed) });
+  const eddie = createEddieBroadcastTransport('ix-quiet');
+  t.after(() => {
+    lab.close();
+    eddie.close();
+  });
+  eddie.publish({ v: 1, room: 'ix-quiet', op: 'set', props: { '--ed-x': '1px' }, scope: 'southleft', from: 'presenter' });
+  eddie.publish({ v: 1, room: 'ix-quiet', op: 'set', props: { '--ed-y': '2px' }, scope: 'bfw', from: 'presenter' });
+  await settle();
+  assert.deepEqual(changes, [['--ed-y']]);
+});
