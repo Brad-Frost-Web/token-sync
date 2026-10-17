@@ -27,7 +27,9 @@ const CONTRACT_PREFIX = 'contract:';
  *   timers?: { now(): number, setTimeout(fn: () => void, ms: number): unknown, clearTimeout(id: unknown): void },
  *   onApply?: (info: { changed: string[], at: number }) => void,
  *   onRefuse?: (info: { name: string, value: string, reason: string }) => void,
- * }} [options]
+ *   transition?: (update: () => void) => void,
+ * }} [options] `transition` wraps each batch of writes, e.g. in a View
+ *   Transition (see wipe.js). It must call `update` exactly once, now or soon.
  */
 export function createApplier({
   root = globalThis.document?.documentElement,
@@ -40,6 +42,7 @@ export function createApplier({
   },
   onApply = () => {},
   onRefuse = () => {},
+  transition = (update) => update(),
 } = {}) {
   if (!root?.style) throw new Error('token-sync: the applier needs an element to apply to');
   // A hair over 1000 / max, so a timer firing a millisecond early can never
@@ -54,6 +57,8 @@ export function createApplier({
   const types = new Map();
 
   let desired = {};
+  /** While held, the page shows its own values: "before", for comparing. */
+  let held = false;
   /** `name value` pairs already reported, so a refusal warns once, not on every message. */
   const reported = new Set();
   let lastFlush = -Infinity;
@@ -65,33 +70,46 @@ export function createApplier({
     return types.get(name);
   }
 
-  function flush() {
-    timer = null;
-    const now = timers.now();
-    const changed = [];
-
-    for (const [name, value] of Object.entries(desired)) {
+  /**
+   * Work out the writes that make the page show `target`, record them as
+   * applied, and return them. Nothing touches the page yet.
+   */
+  function plan(target) {
+    const writes = [];
+    for (const [name, value] of Object.entries(target)) {
       if (applied.get(name) === value) continue;
       if (!originalInline.has(name)) originalInline.set(name, root.style.getPropertyValue(name));
-      root.style.setProperty(name, value);
+      writes.push([name, value]);
       applied.set(name, value);
-      changed.push(name);
     }
     for (const name of [...applied.keys()]) {
-      if (name in desired) continue;
-      const original = originalInline.get(name) ?? '';
-      if (original) root.style.setProperty(name, original);
-      else root.style.removeProperty(name);
+      if (name in target) continue;
+      writes.push([name, originalInline.get(name) ?? '']);
       applied.delete(name);
-      changed.push(name);
     }
+
+    return writes;
+  }
+
+  function write(writes) {
+    for (const [name, value] of writes) {
+      if (value) root.style.setProperty(name, value);
+      else root.style.removeProperty(name);
+    }
+  }
+
+  function flush() {
+    timer = null;
+    const writes = plan(held ? {} : desired);
     // Only a visible change opens a new damping window. A lock, a repeat of
     // the current value, or a refused value changes nothing on screen, and
     // must not delay the next real edit.
-    if (changed.length) {
-      lastFlush = now;
-      onApply({ changed, at: now });
-    }
+    if (!writes.length) return;
+    lastFlush = timers.now();
+    transition(() => {
+      write(writes);
+      onApply({ changed: writes.map(([name]) => name), at: timers.now() });
+    });
   }
 
   function schedule() {
@@ -140,8 +158,23 @@ export function createApplier({
      */
     destroy() {
       if (timer !== null) timers.clearTimeout(timer);
+      timer = null;
       desired = {};
-      flush();
+      write(plan({}));
+    },
+    /**
+     * Hold the page on its own values ("before") while `on`, then let go back
+     * to the room's state ("after"). The room's state is kept throughout.
+     * Changes still go through damping, so tapping the key can't flash.
+     * @param {boolean} on
+     */
+    hold(on) {
+      if (held === Boolean(on)) return;
+      held = Boolean(on);
+      schedule();
+    },
+    get held() {
+      return held;
     },
   };
 }

@@ -7,10 +7,13 @@
 // this tab — and keeps doing so for the rest of the tab's session, so you can
 // click around the site. ?token-sync=off leaves.
 //
+// While it's on, each change sweeps across the page, and holding \ shows the
+// page as it was before the room touched it.
+//
 // Preview only: it changes this tab's custom properties and nothing else.
 // Real visitors never carry the parameter, so they never see a change.
 
-import { connect, createApplier } from '../../client/src/index.js';
+import { connect, createApplier, createWipe, holdToCompare } from '../../client/src/index.js';
 import { isRoom } from '../../protocol/src/index.js';
 
 export const PARAM = 'token-sync';
@@ -82,6 +85,8 @@ export function start({
   const emit = (type, detail) => document.dispatchEvent(new CustomEvent(type, { detail: { room, ...detail } }));
   const applier = createApplier({
     root: document.documentElement,
+    // Each change sweeps in (instantly under prefers-reduced-motion).
+    transition: createWipe({ document }),
     // Read after onChange below has recorded the newest message, whichever
     // order the two arrive in — so a damped change reports its real delay.
     onApply: ({ changed, at }) =>
@@ -100,6 +105,13 @@ export function start({
     },
     onError: ({ errors }) => console.warn(`token-sync: dropped a message — ${errors.join('; ')}`),
   });
+  // Hold \ to see the page before the room's tokens; release for after.
+  const stopComparing = holdToCompare(applier, { target: globalThis.window });
+  const closeSession = session.close;
+  session.close = () => {
+    stopComparing();
+    closeSession();
+  };
   document.documentElement.dataset.tokenSync = room;
   const leave = requested === undefined ? `Add ?${PARAM}=off to the URL to leave.` : 'Run the bookmarklet again and type "off" to leave.';
   console.info(`token-sync: previewing room "${room}" in this tab. ${leave}`);

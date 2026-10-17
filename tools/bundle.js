@@ -31,7 +31,11 @@ const EXPORT_DECL = /^export\s+(?:async\s+)?(function\*?|const|class)\s+([A-Za-z
  * unescaped backticks; `${…}` holding a nested template is not handled, and
  * this repo's source has none.
  */
-function togglesTemplate(line) {
+function togglesTemplate(line, inTemplate = false) {
+  // Outside a template, a comment line's backticks are prose (`like this`), not code.
+  const t = line.trim();
+  if (!inTemplate && (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))) return false;
+
   return (line.replace(/\\./g, '').split('`').length - 1) % 2 === 1;
 }
 
@@ -97,7 +101,7 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
       const where = `${relative(REPO_ROOT, file)}:${index + 1}`;
       // Inside a multi-line template literal every line is string content.
       const startedInTemplate = inTemplate;
-      if (togglesTemplate(original)) inTemplate = !inTemplate;
+      if (togglesTemplate(original, inTemplate)) inTemplate = !inTemplate;
       if (startedInTemplate) return original;
       // A leading /* … */ is only a comment: drop it so `/* note */ export …`
       // is read as the export it is.
@@ -202,7 +206,7 @@ export function bundle(entry, { globalName, stripComments = false } = {}) {
       // Template-literal content is kept exactly: not trimmed, not dropped.
       if (inString) {
         kept.push(line);
-        if (togglesTemplate(line)) inString = false;
+        if (togglesTemplate(line, true)) inString = false;
         continue;
       }
       if (inBlock) {
