@@ -35,13 +35,13 @@ The script does nothing on an ordinary page view. Visit the page with `?token-sy
 
 ### Or as one file
 
-`npm run build` writes `dist/token-sync.js`: the same drop-in as a single classic script, with no module graph to serve. Load it with `<script src="token-sync.js"></script>`, and it exposes `window.TokenSync` (`start`, `resolveRoom`).
+`npm run build` writes `dist/token-sync.js`: the same drop-in as a single classic script, with no module graph to serve. Load it with `<script src="token-sync.js"></script>`, and it exposes `window.TokenSync` (`start`, `resolveRoom`, `PARAM`, `STORAGE_KEY`).
 
 ## The bookmarklet
 
 To preview a site you can't add a script to, run `npm start` and open <http://127.0.0.1:4321/demo/bookmarklet.html>. Drag the link to your bookmarks bar, select it on any page, and type a room code. Type `off` to leave. It only reaches the page you select it on, and a strict Content Security Policy can block it. `npm run build` also writes the URL to `dist/bookmarklet.txt`.
 
-Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency. It refuses anything it doesn't translate (default exports, namespace imports, dynamic `import()`, cycles) rather than guessing.
+Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency (see Deviations). It refuses anything it doesn't translate (default exports, namespace imports, `export let`, multiple declarators, dynamic `import()`, non-relative imports, cycles, and an import of a name its module doesn't export) rather than guessing.
 
 ## The protocol: `token-sync/1`
 
@@ -100,6 +100,7 @@ Node's built-in test runner. The suites cover the bundler and the built bookmark
 Documented per AGENTS.md §1.6:
 
 - **Vanilla JS with no framework, no build and no Eddie runtime dependency** in the packages. They run inside other people's pages, so they carry nothing those pages didn't ask for. The lab's own UI (the demo pages here, and later the remote and the extension popup) is built from Eddie.
+- **Our own bundler instead of a third-party one.** `tools/bundle.js` covers the handful of import/export forms these packages use and refuses the rest, which kept the build free of dependencies. If the packages ever need syntax it refuses, adopting esbuild (pinned) is the move, not stretching the bundler.
 - **Google Fonts.** AGENTS.md §2.2 forbids Google Fonts links. The applier's planned font sync ([#10](https://github.com/Brad-Frost-Web/token-sync/issues/10)) will request from `fonts.googleapis.com` / `fonts.gstatic.com`, but only in an activated preview session. Brad decided this in FEATURE-SPEC §10 Q3. It's preview-only by construction, and nobody should copy the pattern into a shipping product.
 
 ## Process

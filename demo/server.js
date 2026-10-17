@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bookmarkletUrl, tokenSyncScript } from '../packages/bookmarklet/build.js';
+import { bookmarkletUrl } from '../packages/bookmarklet/build.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOST = '127.0.0.1';
@@ -19,7 +19,6 @@ const escapeAttribute = (value) =>
 
 // Built from source on every request, so the demo can never serve a stale build.
 const GENERATED = {
-  '/dist/token-sync.js': () => ({ type: 'text/javascript; charset=utf-8', body: tokenSyncScript() }),
   '/demo/bookmarklet.html': async () => ({
     type: 'text/html; charset=utf-8',
     body: (await readFile(join(ROOT, 'demo/bookmarklet.html'), 'utf8')).replace('{{BOOKMARKLET_URL}}', escapeAttribute(bookmarkletUrl())),
@@ -35,9 +34,18 @@ const server = createServer(async (req, res) => {
 
     return;
   }
-  if (pathname in GENERATED) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A malformed escape (%E0) throws; answer it rather than crash the server.
+    res.writeHead(400, { 'content-type': 'text/plain' }).end('Bad request');
+
+    return;
+  }
+  if (decoded in GENERATED) {
     try {
-      const { type, body } = await GENERATED[pathname]();
+      const { type, body } = await GENERATED[decoded]();
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
     } catch (error) {
       res.writeHead(500, { 'content-type': 'text/plain' }).end(`Build failed: ${error.message}`);
@@ -45,15 +53,7 @@ const server = createServer(async (req, res) => {
 
     return;
   }
-  let relative;
-  try {
-    relative = normalize(decodeURIComponent(pathname)).replace(/^[/\\]+/, '');
-  } catch {
-    // A malformed escape (%E0) throws; answer it rather than crash the server.
-    res.writeHead(400, { 'content-type': 'text/plain' }).end('Bad request');
-
-    return;
-  }
+  const relative = normalize(decoded).replace(/^[/\\]+/, '');
   const allowed = SERVED.some((prefix) => relative.startsWith(prefix)) && !relative.split(sep).includes('..');
   if (!allowed || !(extname(relative) in TYPES)) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found');

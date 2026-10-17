@@ -58,6 +58,13 @@ export function start({
   document = globalThis.document,
   transport = 'broadcast',
 } = {}) {
+  if (requested !== undefined && requested !== 'off' && !isRoom(requested)) {
+    // Refuse before touching anything: a typo must not silently drop the room
+    // this tab is in (and leave sessionStorage pointing back at it).
+    console.warn(`token-sync: "${requested}" is not a room code (letters, digits and hyphens). Nothing changed.`);
+
+    return globalThis.tokenSync ?? null;
+  }
   const search = requested === undefined ? (location?.search ?? '') : `?${PARAM}=${encodeURIComponent(requested)}`;
   const room = resolveRoom({ search, storage });
   globalThis.tokenSync?.close?.();
@@ -94,7 +101,8 @@ export function start({
     onError: ({ errors }) => console.warn(`token-sync: dropped a message — ${errors.join('; ')}`),
   });
   document.documentElement.dataset.tokenSync = room;
-  console.info(`token-sync: previewing room "${room}" in this tab. Add ?${PARAM}=off to the URL to leave.`);
+  const leave = requested === undefined ? `Add ?${PARAM}=off to the URL to leave.` : 'Run the bookmarklet again and type "off" to leave.';
+  console.info(`token-sync: previewing room "${room}" in this tab. ${leave}`);
   globalThis.tokenSync = session;
 
   return session;
