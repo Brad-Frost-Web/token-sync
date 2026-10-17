@@ -20,7 +20,8 @@ import { createBroadcastTransport, createLocalTransport } from './transports.js'
  *   onChange?: (info: { props: Record<string, string>, changed: string[], message: object, locked: boolean }) => void,
  *   onError?: (info: { errors: string[], message: unknown }) => void,
  * }} options `presenter` grants reset and lock. Over `broadcast` every tab is a
- *   presenter (spec §8); over the relay the relay decides, by presenter key.
+ *   presenter (spec §8). Over the relay the relay decides, by presenter key,
+ *   and a transport exposing `isPresenter` (the remote one) answers for it.
  */
 export function connect({ room, transport = 'broadcast', role = 'source', presenter = typeof transport === 'string', applier, onChange = () => {}, onError = () => {} }) {
   if (!isRoom(room)) throw new Error(`token-sync: "${room}" is not a valid room code`);
@@ -57,7 +58,9 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
   }
 
   function presenterOnly(op) {
-    if (!presenter) throw new Error(`token-sync: ${op} needs the presenter key`);
+    // A relay transport knows whether the relay accepted our key; ask it.
+    const allowed = typeof channel.isPresenter === 'boolean' ? channel.isPresenter : presenter;
+    if (!allowed) throw new Error(`token-sync: ${op} needs the presenter key`);
 
     return send(op, 'presenter');
   }

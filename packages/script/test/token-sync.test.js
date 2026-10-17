@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRoom, STORAGE_KEY } from '../src/token-sync.js';
+import { relaySocketUrl, resolveRoom, STORAGE_KEY } from '../src/token-sync.js';
 
 function memoryStorage(initial = {}) {
   const data = new Map(Object.entries(initial));
@@ -51,4 +51,16 @@ test('still works from the URL when storage throws', () => {
   };
   assert.equal(resolveRoom({ search: '?token-sync=detach', storage: throwing }), 'detach');
   assert.equal(resolveRoom({ search: '', storage: throwing }), null);
+});
+
+test('a relay declared by the page becomes the room\'s socket URL', () => {
+  assert.equal(relaySocketUrl('https://relay.example', 'detach'), 'wss://relay.example/rooms/detach/socket');
+  assert.equal(relaySocketUrl('http://127.0.0.1:8787/', 'demo'), 'ws://127.0.0.1:8787/rooms/demo/socket');
+  assert.equal(relaySocketUrl('https://example.com/token-sync/?x=1#y', 'r'), 'wss://example.com/token-sync/rooms/r/socket');
+});
+
+test('anything that is not an http(s) or ws(s) URL means no relay', () => {
+  for (const base of [undefined, '', 'not a url', 'javascript:alert(1)', 'file:///etc/passwd', 'data:text/plain,x']) {
+    assert.equal(relaySocketUrl(base, 'r'), null, String(base));
+  }
 });

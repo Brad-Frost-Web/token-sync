@@ -67,21 +67,40 @@
     </ed-page>
 
     <script type="module">
-      import { connect } from '../packages/client/src/index.js';
+      import { connect, createRemoteTransport } from '../packages/client/src/index.js';
       import { checkValue, inferType } from '../packages/protocol/src/index.js';
 
       const status = document.getElementById('status');
       const lockButton = document.getElementById('lock');
       const say = (text) => (status.textContent = text);
 
+      // ?relay=http://127.0.0.1:8787 (npm run relay): create a room on the relay
+      // and hold its presenter key. Without it: room "demo" over BroadcastChannel.
+      const relay = new URLSearchParams(location.search).get('relay');
+      let room = 'demo';
+      let transport = 'broadcast';
+      if (relay) {
+        const created = await (await fetch(new URL('/rooms', relay), { method: 'POST' })).json();
+        room = created.room;
+        const socket = new URL(`/rooms/${room}/socket`, relay);
+        socket.protocol = socket.protocol === 'https:' ? 'wss:' : 'ws:';
+        transport = createRemoteTransport({
+          url: socket.href,
+          presenterKey: created.presenterKey,
+          onStatus: ({ state }) => state === 'closed' && say('Lost the relay. Reconnecting…'),
+          onRelayError: (message) => say(`The relay refused that: ${message}`),
+        });
+        document.querySelector('ed-button[target="_blank"]').href = `target.html?token-sync=${room}&relay=${encodeURIComponent(relay)}`;
+      }
       const session = connect({
-        room: 'demo',
+        room,
+        transport,
         role: 'source',
         // The label stays put; aria-pressed carries the state.
         onChange: ({ locked }) => (lockButton.pressed = String(locked)),
       });
       window.tokenSyncSource = session;
-      say('Connected to room “demo”. Open the target page, then change a token.');
+      say(relay ? `Created room “${room}” on the relay at ${relay}, as its presenter. Open the target page, then change a token.` : 'Connected to room “demo”. Open the target page, then change a token.');
 
       // Start each control at the value the theme already has.
       const root = getComputedStyle(document.documentElement);
