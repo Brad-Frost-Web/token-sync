@@ -38,15 +38,18 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
         : transport;
 
   const unsubscribe = channel.subscribe((incoming) => {
-    const message = keyFor && incoming?.props && typeof incoming.props === 'object'
+    const normalized = keyFor && incoming?.props && typeof incoming.props === 'object'
       ? { ...incoming, props: Object.fromEntries(Object.entries(incoming.props).map(([key, value]) => [keyFor(key), value])) }
       : incoming;
-    const result = validateMessage(message);
+    const result = validateMessage(normalized);
     if (!result.ok) {
-      onError({ errors: result.errors, message });
+      onError({ errors: result.errors, message: normalized });
 
       return;
     }
+    // The props that passed; the rest are reported and dropped one by one.
+    const { message, refused } = result;
+    if (refused.length) onError({ errors: refused.map((r) => `${r.name}: ${r.reason}`), message: normalized });
     if (message.room !== room) return;
     // A request for the room's state: the transport or the relay answers it.
     if (isSnapshotRequest(message)) return;
@@ -60,6 +63,7 @@ export function connect({ room, transport = 'broadcast', role = 'source', presen
     const message = createMessage({ room, op, from, props });
     const result = validateMessage(message, { requireTs: false });
     if (!result.ok) throw new Error(`token-sync: refused to send — ${result.errors.join('; ')}`);
+    if (result.refused.length) throw new Error(`token-sync: refused to send — ${result.refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`);
 
     return channel.publish(message);
   }

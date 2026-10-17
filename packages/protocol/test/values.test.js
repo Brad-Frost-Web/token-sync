@@ -35,7 +35,13 @@ test('refuses the ways around the refusal list', () => {
   // Not strings, empty, oversized.
   assert.equal(checkSafety(12).ok, false);
   assert.equal(checkSafety('').ok, false);
-  assert.equal(checkSafety('a'.repeat(201)).ok, false);
+  assert.equal(checkSafety('a'.repeat(401)).ok, false);
+  assert.equal(checkSafety('a'.repeat(400)).ok, true);
+});
+
+test("accepts the easings Eddie's contract derives", () => {
+  assert.equal(checkSafety('cubic-bezier(0.2, 0, 0, 1)').ok, true);
+  assert.equal(checkSafety('steps(4, end)').ok, true);
 });
 
 test('accepts ordinary token values', () => {

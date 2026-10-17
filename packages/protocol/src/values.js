@@ -21,13 +21,16 @@
 // a new one. Likewise a property the page doesn't define is typed `any`, and
 // fetches only if the page's own CSS wraps it in something that loads it.
 
-export const MAX_VALUE_LENGTH = 200;
+// Eddie's applier caps a value at 400 (docs/TOKEN-SYNC.md); the lab matches it.
+export const MAX_VALUE_LENGTH = 400;
 
 const ALLOWED_FUNCTIONS = new Set([
   'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch',
   'color', 'color-mix', 'light-dark',
   'calc', 'clamp', 'min', 'max',
   'var',
+  // Easing: Eddie's contract derives cubic-bezier() for its animation tokens.
+  'cubic-bezier', 'steps',
 ]);
 
 const COLOR_FUNCTIONS = new Set([

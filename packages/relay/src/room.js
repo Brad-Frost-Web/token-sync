@@ -31,9 +31,11 @@ import { createRoomState, isSnapshotRequest, validateMessage } from '../../proto
 export const MAX_FRAME_LENGTH = 16 * 1024;
 /** Most distinct custom properties one room may hold, so a room's state (and its stored snapshot) stays bounded. */
 export const MAX_ROOM_KEYS = 2000;
+/** How often one connection may ask for the room's state with an empty snapshot. */
+export const REQUEST_COOLDOWN_MS = 2000;
 
 /**
- * @typedef {{ presenter: boolean, ready: boolean, tokens: number, refilled: number, warned?: boolean }} Client
+ * @typedef {{ presenter: boolean, ready: boolean, tokens: number, refilled: number, warned?: boolean, askedAt?: number }} Client
  * @typedef {{ to: 'sender' | 'all', frame: object }} Outbound
  */
 
@@ -61,7 +63,7 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
   }
 
   /** The room so far, for one client: real writes as sets, so they win over stale values by their times. */
-  const catchUp = () => state.snapshotMessages(room, { asSets: true }).map((msg) => ({ to: 'sender', frame: { kind: 'msg', msg } }));
+  const catchUp = ({ withReset = true } = {}) => state.snapshotMessages(room, { asSets: true, withReset }).map((msg) => ({ to: 'sender', frame: { kind: 'msg', msg } }));
 
   const error = (message) => [{ to: 'sender', frame: { kind: 'error', error: message } }];
 
@@ -106,18 +108,30 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     if (!client.ready) return error('say hello first');
     if (frame?.kind !== 'msg') return error('unknown frame kind');
 
-    const { ts: _clientTs, ...unstamped } = frame.msg ?? {};
-    const check = validateMessage(unstamped, { requireTs: false });
+    const { ts: _clientTs, ...sent } = frame.msg ?? {};
+    const check = validateMessage(sent, { requireTs: false });
     if (!check.ok) return error(check.errors.join('; '));
+    // Bad props are dropped one by one; the sender hears which.
+    const unstamped = check.message;
+    const refusedNote = check.refused.length ? error(`refused ${check.refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`) : [];
     if (unstamped.room !== room) return error('wrong room');
-    if (isSnapshotRequest(unstamped)) return catchUp();
+    if (isSnapshotRequest(unstamped)) {
+      // A request costs the whole room in egress, so one per client per
+      // REQUEST_COOLDOWN_MS; the rate limit alone would allow twenty a second.
+      const t = now();
+      if (t - (client.askedAt ?? -Infinity) < REQUEST_COOLDOWN_MS) return [];
+      client.askedAt = t;
+      // No reset: an Eddie display clears everything it wrote on any reset,
+      // so one in every answer would flash its page back to the base theme.
+      return catchUp({ withReset: false });
+    }
     if (unstamped.op === 'snapshot') return error('snapshots come from the relay');
     if (unstamped.from === 'presenter' && !client.presenter) return error('only the presenter may speak as presenter');
     if (state.locked && unstamped.op === 'set' && !client.presenter) return error('the room is locked');
 
     if (unstamped.op === 'set') {
-      const current = state.props();
-      const added = Object.keys(unstamped.props).filter((key) => !(key in current)).length;
+      // Cleared keys still count against the cap, so a cleared key coming back adds nothing.
+      const added = Object.keys(unstamped.props).filter((key) => !state.has(key)).length;
       if (state.size() + added > MAX_ROOM_KEYS) return error(`a room may hold at most ${MAX_ROOM_KEYS} properties`);
     }
 
@@ -127,7 +141,7 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     const outcome = state.apply(msg);
     if (!outcome.applied) return error(outcome.reason ?? 'not applied');
 
-    return [{ to: 'all', frame: { kind: 'msg', msg } }];
+    return [...refusedNote, { to: 'all', frame: { kind: 'msg', msg } }];
   }
 
   return {

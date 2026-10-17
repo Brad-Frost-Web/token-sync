@@ -24,10 +24,11 @@ export const ROLES = ['controller', 'presenter', 'source'];
 export const PRESENTER_OPS = ['reset', 'lock', 'unlock'];
 
 const ROOM = /^[a-z0-9][a-z0-9-]{0,63}$/i;
-const CUSTOM_PROPERTY = /^--[a-z0-9_-]{1,120}$/i;
+// Eddie's limits: names to 128 characters, 400 props a message.
+const CUSTOM_PROPERTY = /^--[a-z0-9_-]{1,126}$/i;
 const CONTRACT_KEY = /^contract:[a-z0-9][a-z0-9.-]{0,120}$/i;
 const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/i;
-const MAX_PROPS = 500;
+const MAX_PROPS = 400;
 const FONT_FAMILY = /^[A-Za-z0-9 ]{1,64}$/;
 export const MAX_FONTS = 8;
 
@@ -47,13 +48,17 @@ export function isRoom(room) {
 }
 
 /**
- * Validate a message. Refuses the whole message on any problem: a change that
- * arrives half-applied is harder to reason about than one that didn't arrive.
+ * Validate a message. A problem with the message itself (its op, room, role,
+ * stamp, fonts) refuses all of it. A bad prop is refused on its own, as Eddie
+ * does: the result's `message` carries the props that passed, and `refused`
+ * says which didn't and why. Refusing the whole message instead let one value
+ * the lab can't read (a derived easing, say) throw away a customizer's entire
+ * snapshot answer. A set left with no props is refused.
  *
  * @param {unknown} msg
  * @param {{ requireTs?: boolean }} [options] `requireTs: false` for a message a
  *   client is about to send, before the channel stamps it.
- * @returns {{ ok: true, message: object } | { ok: false, errors: string[] }}
+ * @returns {{ ok: true, message: object, refused: { name: string, reason: string }[] } | { ok: false, errors: string[] }}
  */
 export function validateMessage(msg, { requireTs = true } = {}) {
   const errors = [];
@@ -86,6 +91,8 @@ export function validateMessage(msg, { requireTs = true } = {}) {
   }
 
   const needsProps = m.op === 'set' || m.op === 'snapshot';
+  const refused = [];
+  let props;
   if (needsProps) {
     if (!m.props || typeof m.props !== 'object' || Array.isArray(m.props)) {
       errors.push(`${m.op} needs a props object`);
@@ -93,15 +100,24 @@ export function validateMessage(msg, { requireTs = true } = {}) {
       const entries = Object.entries(m.props);
       if (m.op === 'set' && entries.length === 0) errors.push('set needs at least one prop');
       if (entries.length > MAX_PROPS) errors.push(`props may hold at most ${MAX_PROPS} keys`);
+      props = {};
       for (const [key, value] of entries) {
         if (!isPropKey(key)) {
-          errors.push(`"${key}" is not a custom property or contract:<path> key`);
+          refused.push({ name: String(key).slice(0, 128), reason: 'not a custom property or contract:<path> key' });
           continue;
         }
         // null clears the token; it carries nothing to check.
-        if (value === null) continue;
-        const safety = checkSafety(value);
-        if (!safety.ok) errors.push(`${key}: ${safety.reason}`);
+        if (value !== null) {
+          const safety = checkSafety(value);
+          if (!safety.ok) {
+            refused.push({ name: key, reason: safety.reason });
+            continue;
+          }
+        }
+        props[key] = value;
+      }
+      if (m.op === 'set' && entries.length > 0 && Object.keys(props).length === 0) {
+        errors.push(...refused.map((r) => `${r.name}: ${r.reason}`));
       }
     }
   } else if (m.props !== undefined) {
@@ -110,7 +126,7 @@ export function validateMessage(msg, { requireTs = true } = {}) {
 
   if (errors.length) return { ok: false, errors };
 
-  return { ok: true, message: m };
+  return { ok: true, message: props && refused.length ? { ...m, props } : m, refused };
 }
 
 /**

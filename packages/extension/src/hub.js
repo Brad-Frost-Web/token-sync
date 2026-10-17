@@ -67,8 +67,11 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
       onStatus: ({ state: s }) => (status = { ...status, state: s }),
       onRelayError: (error) => (status = { ...status, error }),
     });
-    transport.subscribe((msg) => {
-      if (!validateMessage(msg).ok || msg.room !== session?.room) return;
+    transport.subscribe((incoming) => {
+      const check = validateMessage(incoming);
+      if (!check.ok || check.message.room !== session?.room) return;
+      // Only the props that passed travel on to the tabs.
+      const msg = check.message;
       if (state.apply(msg).applied) broadcast({ kind: 'msg', msg });
     });
   }

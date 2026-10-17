@@ -166,6 +166,8 @@ An `ed-r-theme-customizer` and a lab page in the same browser share a room with 
 - When a page joins, it posts an empty snapshot to ask for the room's state. Lab pages answer with their writes grouped by when they happened. A customizer answers with what it has published.
 - A broadcast answer leaves out the last reset. An Eddie display clears everything it has written when any reset arrives, however old, so replaying one would wipe newer writes on every Eddie page in the room.
 - On the relay, a customizer takes the lab's remote transport as its `remoteTransport`.
+- Lab answers carry no `scope` yet (#11), so a display reads them as meant for every theme.
+- Two writes stamped in the same millisecond can settle differently on lab and Eddie pages. The lab picks the larger value; Eddie keeps whichever arrived last.
 - A stamp more than 5 seconds in the future is dropped on broadcast; Eddie pulls one more than a minute ahead back to now. Both share one machine's clock, so an honest message is never near either limit.
 
 ### Fonts
@@ -179,7 +181,7 @@ Set a `font-family` token to a family the page doesn't have, and the applier fet
 
 ### Guardrails
 
-- **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max` and `var()` may appear, so nothing that fetches can get in. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
+- **Values are checked before they land.** Refused anywhere in a value: `url(`, `;`, `{`, `}`, `!important`, backslashes (a CSS escape can spell `url(` without the letters), `<`, `>`, `@`, and anything outside printable ASCII. Only colour functions, `calc`/`clamp`/`min`/`max`, the easings `cubic-bezier`/`steps` and `var()` may appear, so nothing that fetches can get in. A refused value is dropped on its own, as Eddie does, and the rest of the message still lands. A message with something wrong outside its props, such as its op, room, role or stamp, is refused whole. Then each value must parse as the kind of value the property already holds on the page: a colour stays a colour, a length stays a length.
 - **`setProperty` only.** Values are never joined into CSS text, so a value can't become a rule.
 - **Damping.** A page changes at most 3 times a second, whatever arrives (WCAG 2.3.1). The first change lands immediately. Changes arriving faster than that are combined, and the latest one lands at the end of each 333 ms window. So a lone edit lands in a few milliseconds, and an edit inside a burst can wait up to a third of a second.
 - **Reset and lock.** A presenter can put every page back to its theme, or make controllers read-only. Over `broadcast` every tab is a presenter. Over the relay, only the holder of the room's presenter key is.

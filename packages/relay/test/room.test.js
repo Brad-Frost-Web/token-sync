@@ -116,11 +116,14 @@ test('room codes and keys are well formed', () => {
 test('a room holds a bounded number of properties', () => {
   const { room, hello } = setup({ maxMessagesPerSecond: 1000 });
   const client = hello();
-  for (let batch = 0; batch < 4; batch += 1) {
-    const props = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`--k-${batch}-${i}`, '1px']));
+  for (let batch = 0; batch < 5; batch += 1) {
+    const props = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`--k-${batch}-${i}`, '1px']));
     assert.equal(send(room, client, { op: 'set', from: 'controller', props })[0].to, 'all');
   }
   assert.match(send(room, client, { op: 'set', from: 'controller', props: { '--one-too-many': '1px' } })[0].frame.error, /at most 2000/);
+  // A cleared key still holds its place, so it can come back in a full room.
+  assert.equal(send(room, client, { op: 'set', from: 'controller', props: { '--k-0-0': null } })[0].to, 'all');
+  assert.equal(send(room, client, { op: 'set', from: 'controller', props: { '--k-0-0': '2px' } })[0].to, 'all');
 });
 
 test('junk frames spend from the same bucket, and a flood gets one warning, not one per frame', () => {
@@ -150,4 +153,25 @@ test('fonts travel through the relay with the props', () => {
   const { room, hello } = setup();
   const out = send(room, hello(), { op: 'set', from: 'source', props: { '--ed-font': '"Fraunces", serif' }, fonts: ['Fraunces'] });
   assert.deepEqual(out[0].frame.msg.fonts, ['Fraunces']);
+});
+
+test('requests answer without the reset, and one connection may ask once every couple of seconds', () => {
+  const { room, hello, tick } = setup();
+  const presenter = hello(KEY);
+  send(room, presenter, { op: 'set', from: 'presenter', props: { '--a': '1px' } });
+  send(room, presenter, { op: 'reset', from: 'presenter' });
+  send(room, presenter, { op: 'set', from: 'presenter', props: { '--a': '2px' } });
+  const asker = hello();
+  const ask = () => send(room, asker, { op: 'snapshot', from: 'source', props: {} }).map((o) => o.frame.msg?.op);
+  assert.deepEqual(ask(), ['set']);
+  assert.deepEqual(ask(), []);
+  tick(2000);
+  assert.deepEqual(ask(), ['set']);
+});
+
+test('a bad prop is dropped and the sender told; the rest goes to the room', () => {
+  const { room, hello } = setup();
+  const out = send(room, hello(), { op: 'set', from: 'source', props: { '--a': '1px', '--b': 'url(x)' } });
+  assert.match(out[0].frame.error, /--b/);
+  assert.deepEqual(out[1].frame.msg.props, { '--a': '1px' });
 });

@@ -143,14 +143,17 @@ export function createRoomState() {
     return messages;
   }
 
-  /** How many keys the room holds. */
+  /** How many keys the room holds, cleared ones included. */
   const size = () => entries.size;
+  /** Whether the room has heard of this key, cleared or not. */
+  const has = (key) => entries.has(key);
 
   return {
     apply,
     props,
     snapshotMessages,
     size,
+    has,
     get locked() {
       return lock.locked;
     },

@@ -13,10 +13,18 @@ test('accepts contract knobs and a scope', () => {
   assert.equal(validateMessage(msg).ok, true);
 });
 
-test('refuses the whole message when one value is refused', () => {
+test('a refused value is dropped on its own, as Eddie does; a set with nothing left is refused', () => {
   const result = validateMessage({ ...base, props: { '--brand': '#f05735', '--bg': 'url(x)' } });
-  assert.equal(result.ok, false);
-  assert.match(result.errors.join('\n'), /--bg: url\( is refused/);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.message.props, { '--brand': '#f05735' });
+  assert.equal(result.refused.length, 1);
+  assert.match(`${result.refused[0].name}: ${result.refused[0].reason}`, /--bg: url\( is refused/);
+  const none = validateMessage({ ...base, props: { '--bg': 'url(x)' } });
+  assert.equal(none.ok, false);
+  assert.match(none.errors.join('\n'), /--bg: url\( is refused/);
+  // A snapshot answer with one value the lab can't read still fills the rest.
+  const answer = validateMessage({ ...base, op: 'snapshot', props: { '--brand': '#f05735', '--bg': 'url(x)' } });
+  assert.deepEqual(answer.message.props, { '--brand': '#f05735' });
 });
 
 test('refuses keys that are not custom properties or contract paths', () => {

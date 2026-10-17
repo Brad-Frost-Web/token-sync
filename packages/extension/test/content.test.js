@@ -44,8 +44,8 @@ test('the page applies what the background sends, with the same guardrails as th
   page.send({ kind: 'config', room: 'detach' });
   page.send({ kind: 'msg', msg: { v: 1, room: 'detach', op: 'set', from: 'controller', props: { '--brand': '#0a7f5a', '--bg': 'url(x)' }, ts: 1 } });
   assert.equal(page.document.documentElement.dataset.tokenSync, 'detach');
-  assert.equal(page.props.get('--brand'), undefined); // the whole message was refused for its url(
-  page.send({ kind: 'msg', msg: { v: 1, room: 'detach', op: 'set', from: 'controller', props: { '--brand': '#0a7f5a' }, ts: 2 } });
+  // The url( is refused on its own; the colour beside it still lands.
+  assert.equal(page.props.get('--bg'), undefined);
   assert.equal(page.props.get('--brand'), '#0a7f5a');
 });
 
