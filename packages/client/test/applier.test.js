@@ -134,3 +134,27 @@ test('destroy puts the page back immediately, even mid-window', () => {
     mock.timers.reset();
   }
 });
+
+test('a flush that changes nothing does not delay the next real edit', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    const { root, applier } = setup({ '--brand': '#be6700' });
+    applier.render({ '--brand': '#000000' });
+    mock.timers.tick(400);
+    applier.render({ '--brand': '#000000' }); // a lock, or a repeat: nothing visible
+    mock.timers.tick(50);
+    applier.render({ '--brand': '#ffffff' }); // a real edit 50 ms later lands now
+    assert.equal(root.get('--brand'), '#ffffff');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a refused value keeps the last good one on screen and is reported once', () => {
+  const { root, applier, refused } = setup({ '--brand': '#be6700' });
+  applier.render({ '--brand': '#000000' });
+  applier.render({ '--brand': '12px' });
+  applier.render({ '--brand': '12px' });
+  assert.equal(root.get('--brand'), '#000000');
+  assert.equal(refused.length, 1);
+});

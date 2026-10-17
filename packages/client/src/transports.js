@@ -33,6 +33,20 @@ export function createClock(now = () => Date.now()) {
   };
 }
 
+/**
+ * How far ahead of this machine's clock a stamp on a same-machine channel may
+ * be. Every peer on `local` or `broadcast` shares one clock, so a stamp well
+ * in the future is forged or broken — and adopting it would push every later
+ * write behind it (a reset stamped at Number.MAX_VALUE would refuse every
+ * write after it, in every tab, until they all reloaded).
+ */
+export const MAX_FUTURE_MS = 5000;
+
+/** @param {{ ts?: unknown }} msg @param {() => number} now */
+function fromTheFuture(msg, now) {
+  return typeof msg?.ts === 'number' && msg.ts > now() + MAX_FUTURE_MS;
+}
+
 const defaultHubs = new Map();
 
 /**
@@ -40,12 +54,13 @@ const defaultHubs = new Map();
  * every other, including itself.
  * @param {{ room: string, hub?: Map<string, Set<Function>>, clock?: ReturnType<typeof createClock>, getSnapshot?: () => object[] }} options
  */
-export function createLocalTransport({ room, hub = defaultHubs, clock = createClock(), getSnapshot } = /** @type {any} */ ({})) {
+export function createLocalTransport({ room, hub = defaultHubs, clock = createClock(), getSnapshot, now = () => Date.now() } = /** @type {any} */ ({})) {
   if (!hub.has(room)) hub.set(room, new Set());
   const peers = hub.get(room);
   const listeners = new Set();
   const peer = {
     deliver(msg) {
+      if (fromTheFuture(msg, now)) return;
       clock.observe(msg.ts);
       for (const fn of listeners) fn(msg);
     },
@@ -89,13 +104,14 @@ export function createLocalTransport({ room, hub = defaultHubs, clock = createCl
  *
  * @param {{ room: string, clock?: ReturnType<typeof createClock>, getSnapshot?: () => object[], BroadcastChannelImpl?: typeof BroadcastChannel }} options
  */
-export function createBroadcastTransport({ room, clock = createClock(), getSnapshot, BroadcastChannelImpl = globalThis.BroadcastChannel }) {
+export function createBroadcastTransport({ room, clock = createClock(), getSnapshot, BroadcastChannelImpl = globalThis.BroadcastChannel, now = () => Date.now() }) {
   if (typeof BroadcastChannelImpl !== 'function') {
     throw new Error('token-sync: BroadcastChannel is not available here; use the local or remote transport');
   }
   const channel = new BroadcastChannelImpl(`token-sync/1:${room}`);
   const listeners = new Set();
   const deliver = (msg) => {
+    if (fromTheFuture(msg, now)) return;
     clock.observe(msg.ts);
     for (const fn of listeners) fn(msg);
   };

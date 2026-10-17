@@ -14,6 +14,12 @@
 //
 // Then, when the applier knows what kind of value a property holds, the value
 // must parse as that kind: colours as colours, lengths as lengths.
+//
+// The limit, stated plainly: `var(--x)` is allowed, so a value can point at a
+// property the page itself declares — including one the page set to a url().
+// That can only reach resources the page already references; no value can name
+// a new one. Likewise a property the page doesn't define is typed `any`, and
+// fetches only if the page's own CSS wraps it in something that loads it.
 
 export const MAX_VALUE_LENGTH = 200;
 
@@ -59,9 +65,6 @@ const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
 const LENGTH = new RegExp(`^[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:${LENGTH_UNITS.join('|')})$`, 'i');
 const VAR_REF = /^var\(\s*--[a-z0-9_-]+\s*(?:,[^()]*)?\)$/i;
 const FONT_FAMILY = /^[a-z0-9 ,'"_-]+$/i;
-
-/** The kinds of value the applier can type-check against. */
-export const VALUE_TYPES = ['color', 'length', 'number', 'font-family', 'any'];
 
 /**
  * Check a value against the refusal list and the function allowlist.
@@ -142,9 +145,9 @@ export function isColor(v) {
   const lower = v.trim().toLowerCase();
   if (HEX_COLOR.test(lower)) return true;
   if (NAMED_COLORS.has(lower)) return true;
-  const fn = /^([a-z-]+)\((.*)\)$/s.exec(lower);
+  const fn = /^([a-z-]+)\(/.exec(lower);
 
-  return Boolean(fn && COLOR_FUNCTIONS.has(fn[1]) && balancedParens(lower));
+  return Boolean(fn && COLOR_FUNCTIONS.has(fn[1]) && isOneCall(lower));
 }
 
 /** @param {string} v */
@@ -152,9 +155,28 @@ export function isLength(v) {
   const lower = v.trim().toLowerCase();
   if (lower === '0') return true;
   if (LENGTH.test(lower)) return true;
-  const fn = /^([a-z-]+)\((.*)\)$/s.exec(lower);
+  const fn = /^([a-z-]+)\(/.exec(lower);
 
-  return Boolean(fn && MATH_FUNCTIONS.has(fn[1]) && balancedParens(lower));
+  return Boolean(fn && MATH_FUNCTIONS.has(fn[1]) && isOneCall(lower));
+}
+
+/**
+ * Is the whole value a single function call — its first `(` closing at the
+ * very last character? `rgb(0 0 0) 12px` is a colour followed by junk, not a colour.
+ * @param {string} v
+ */
+function isOneCall(v) {
+  let depth = 0;
+  for (let i = 0; i < v.length; i += 1) {
+    if (v[i] === '(') depth += 1;
+    if (v[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i === v.length - 1;
+      if (depth < 0) return false;
+    }
+  }
+
+  return false;
 }
 
 /** @param {string} v */
@@ -169,7 +191,20 @@ function balancedParens(v) {
   return depth === 0;
 }
 
-/** @param {string} v */
+/**
+ * Does every quoted string close? Tracks which quote opened, so an apostrophe
+ * inside double quotes (`"it's"`) is just a character.
+ * @param {string} v
+ */
 function balancedQuotes(v) {
-  return (v.split('"').length - 1) % 2 === 0 && (v.split("'").length - 1) % 2 === 0;
+  let open = null;
+  for (const ch of v) {
+    if (open) {
+      if (ch === open) open = null;
+    } else if (ch === '"' || ch === "'") {
+      open = ch;
+    }
+  }
+
+  return open === null;
 }

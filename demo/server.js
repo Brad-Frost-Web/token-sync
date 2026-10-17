@@ -22,7 +22,15 @@ const server = createServer(async (req, res) => {
 
     return;
   }
-  const relative = normalize(decodeURIComponent(pathname)).replace(/^[/\\]+/, '');
+  let relative;
+  try {
+    relative = normalize(decodeURIComponent(pathname)).replace(/^[/\\]+/, '');
+  } catch {
+    // A malformed escape (%E0) throws; answer it rather than crash the server.
+    res.writeHead(400, { 'content-type': 'text/plain' }).end('Bad request');
+
+    return;
+  }
   const allowed = SERVED.some((prefix) => relative.startsWith(prefix)) && !relative.split(sep).includes('..');
   if (!allowed || !(extname(relative) in TYPES)) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found');

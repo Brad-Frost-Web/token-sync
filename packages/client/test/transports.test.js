@@ -78,3 +78,20 @@ test('broadcast: rooms do not hear each other', async () => {
   a.close();
   b.close();
 });
+
+test('a stamp far in the future is dropped, so it cannot push every later write behind it', async (t) => {
+  const forger = new BroadcastChannel('token-sync/1:bc-future');
+  const peer = createBroadcastTransport({ room: 'bc-future' });
+  t.after(() => {
+    forger.close();
+    peer.close();
+  });
+  const heard = [];
+  peer.subscribe((m) => heard.push(m));
+  forger.postMessage({ kind: 'msg', msg: { v: 1, room: 'bc-future', op: 'reset', from: 'presenter', ts: Number.MAX_VALUE } });
+  await nextTick();
+  assert.deepEqual(heard, []);
+  // And the peer's own clock was not dragged forward.
+  const next = peer.publish(msg({ '--x': '1px' }));
+  assert.ok(next.ts < Date.now() + 1000);
+});

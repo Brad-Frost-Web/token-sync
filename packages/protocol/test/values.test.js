@@ -82,3 +82,13 @@ test('infers the type from the value a property holds now', () => {
   assert.equal(inferType(''), 'any');
   assert.equal(inferType(undefined), 'any');
 });
+
+test('a colour or length followed by junk is not a colour or length', () => {
+  assert.equal(checkValue('rgb(0 0 0) calc(1px)', 'color').ok, false);
+  assert.equal(checkValue('calc(1px) red', 'length').ok, false);
+});
+
+test('an apostrophe inside double quotes is just a character', () => {
+  assert.equal(checkSafety('"it\'s", serif').ok, true);
+  assert.equal(checkSafety('"it\'s').ok, false);
+});

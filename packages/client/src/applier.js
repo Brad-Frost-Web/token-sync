@@ -42,7 +42,9 @@ export function createApplier({
   onRefuse = () => {},
 } = {}) {
   if (!root?.style) throw new Error('token-sync: the applier needs an element to apply to');
-  const interval = 1000 / maxChangesPerSecond;
+  // A hair over 1000 / max, so a timer firing a millisecond early can never
+  // squeeze a fourth change into one second.
+  const interval = 1000 / maxChangesPerSecond + 5;
 
   /** Values this applier has written. */
   const applied = new Map();
@@ -52,6 +54,8 @@ export function createApplier({
   const types = new Map();
 
   let desired = {};
+  /** `name value` pairs already reported, so a refusal warns once, not on every message. */
+  const reported = new Set();
   let lastFlush = -Infinity;
   let timer = null;
 
@@ -63,7 +67,7 @@ export function createApplier({
 
   function flush() {
     timer = null;
-    lastFlush = timers.now();
+    const now = timers.now();
     const changed = [];
 
     for (const [name, value] of Object.entries(desired)) {
@@ -81,7 +85,13 @@ export function createApplier({
       applied.delete(name);
       changed.push(name);
     }
-    if (changed.length) onApply({ changed, at: lastFlush });
+    // Only a visible change opens a new damping window. A lock, a repeat of
+    // the current value, or a refused value changes nothing on screen, and
+    // must not delay the next real edit.
+    if (changed.length) {
+      lastFlush = now;
+      onApply({ changed, at: now });
+    }
   }
 
   function schedule() {
@@ -94,19 +104,28 @@ export function createApplier({
   return {
     /**
      * Make the page show this state. Keys that aren't in `props` go back to
-     * what the page had. Refused values are reported and skipped.
+     * what the page had. A refused value is reported once and the key keeps
+     * its last good value.
      * @param {Record<string, string>} props
      */
     render(props) {
       const next = {};
       for (const [name, value] of Object.entries(props)) {
         if (name.startsWith(CONTRACT_PREFIX)) {
-          onRefuse({ name, value, reason: 'contract knobs need the Eddie contract adapter, which is not installed' });
+          if (!reported.has(name)) {
+            reported.add(name);
+            onRefuse({ name, value, reason: 'contract knobs need the Eddie contract adapter, which is not installed' });
+          }
           continue;
         }
         const check = checkValue(value, typeOf(name));
         if (!check.ok) {
-          onRefuse({ name, value, reason: check.reason });
+          if (!reported.has(`${name} ${value}`)) {
+            reported.add(`${name} ${value}`);
+            onRefuse({ name, value, reason: check.reason });
+          }
+          // Keep the last good value on screen rather than snapping back.
+          if (applied.has(name)) next[name] = applied.get(name);
           continue;
         }
         next[name] = value;
@@ -114,7 +133,11 @@ export function createApplier({
       desired = next;
       schedule();
     },
-    /** Put the page back exactly as it was, now, and stop. */
+    /**
+     * Put the page back exactly as it was, now. Deliberately skips damping: it
+     * is the one exit, run when a tab leaves the room. connect().close()
+     * unsubscribes before calling it, so nothing renders afterwards.
+     */
     destroy() {
       if (timer !== null) timers.clearTimeout(timer);
       desired = {};
