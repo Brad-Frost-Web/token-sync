@@ -45,6 +45,23 @@ To preview a site you can't add a script to, run `npm start` and open <http://12
 
 Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency (see Deviations). It refuses anything it doesn't translate (default exports, namespace imports, `export let`, multiple declarators, dynamic `import()`, non-relative imports, cycles, and an import of a name its module doesn't export) rather than guessing.
 
+## The browser extension
+
+For sites you can't add a script to and where a bookmarklet is blocked, there's an MV3 extension for Chromium and Firefox:
+
+```bash
+npm run build:extension   # writes dist/extension/
+```
+
+Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **Load unpacked**, or in Firefox `about:debugging` → **Load Temporary Add-on**. Open the popup on the tab you want, enter a room code and relay, and choose **Preview this tab in the room**.
+
+- **One tab at a time.** Previewing another tab stops the first, and its page goes back to how it was.
+- **Only sites you allow.** The first preview on a site asks the browser for permission for that one site (no blanket "all sites" grant). The site joins the room's allowed list, and as the tab moves between allowed sites the room comes back on every page. The popup lists the allowed sites, and removing one also gives back its permission.
+- **The background holds the relay connection**, so a page's Content Security Policy can't block it. The page runs only the applier, with the same guardrails as the drop-in, including hold <kbd>\</kbd> to compare.
+- **The popup is built from Eddie**, bundled in from the pinned packages, because MV3 forbids remote code.
+
+`npm run extension:smoke` loads the built extension into real Chrome over the DevTools protocol. It checks that the extension loads, its service worker starts, and the popup renders Eddie.
+
 ## Rooms across machines: the relay
 
 `BroadcastChannel` only reaches tabs in one browser. To put phones, a second laptop or a stage display in the same room, run a relay:
@@ -144,7 +161,7 @@ In Eddie's `bfw` build, component tokens hold literal values rather than `var()`
 | `script` | The `?token-sync=<room>` drop-in | Built |
 | `relay` | Cloudflare Durable Object per room, and a self-hostable Node relay | Built, not deployed |
 | `bookmarklet` | One-click applier for any page, plus the single-file build | Built |
-| `extension` | MV3 applier, Chromium and Firefox | [#4](https://github.com/Brad-Frost-Web/token-sync/issues/4) |
+| `extension` | MV3 applier, Chromium and Firefox | Built, not published |
 | `cli` | `token-sync watch`, `poll` and `relay` | Built |
 | `remote` | The phone remote | [#8](https://github.com/Brad-Frost-Web/token-sync/issues/8) |
 

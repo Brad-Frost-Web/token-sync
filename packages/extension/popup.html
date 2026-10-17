@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- eddie-template: ed-p-form — a compact settings form in an extension popup, without the site shell -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <title>Token Sync</title>
+    <link rel="stylesheet" href="eddie/tokens/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="eddie/tokens/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="eddie/tokens/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="eddie/tokens/core/css/base.css" />
+    <script type="module" src="eddie/components/cdn/eddie.js"></script>
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Token Sync</h1></ed-heading>
+              Preview a room's tokens on this tab. Only this tab, and only on sites you allow.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">This tab</ed-heading>
+              <ed-text-passage slot="header"><p id="status" role="status">Checking this tab…</p></ed-text-passage>
+              <ed-stack gap="field">
+                <ed-text-field id="room" label="Room code" name="room" autocomplete="off" fieldNote="The code the presenter shared, like detach or a2b3c4."></ed-text-field>
+                <ed-text-field id="relay" label="Relay" name="relay" type="url" value="http://127.0.0.1:8787" fieldNote="Where the room lives. npm run relay starts one on this machine."></ed-text-field>
+                <ed-cluster gap="inline">
+                  <ed-button id="sync" variant="primary" text="Preview this tab in the room"></ed-button>
+                  <ed-button id="stop" text="Stop previewing" disabled></ed-button>
+                </ed-cluster>
+              </ed-stack>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Allowed sites</ed-heading>
+              <ed-text-passage slot="header"><p>The room is brought back on these sites as the synced tab moves around them.</p></ed-text-passage>
+              <ed-stack id="sites" gap="flow"></ed-stack>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+  </body>
+</html>
