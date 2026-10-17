@@ -119,3 +119,105 @@ test('a large frame (over 125 bytes, so a 16-bit length) round-trips', async (t)
   await until(() => a.frames.some((f) => f.kind === 'msg'));
   assert.equal(Object.keys(a.frames.find((f) => f.kind === 'msg').msg.props).length, 40);
 });
+
+import net from 'node:net';
+import { createHash } from 'node:crypto';
+
+/** Speak raw TCP to the relay, for the frames a well-behaved client never sends. */
+function rawSocket(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, '127.0.0.1', () => resolve(socket));
+  });
+}
+
+const upgradeRequest = (room, key = 'dGhlIHNhbXBsZSBub25jZQ==') =>
+  `GET /rooms/${room}/socket HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`;
+
+/** A masked client text frame. */
+function clientFrame(text, { opcode = 0x1, mask = true } = {}) {
+  const payload = Buffer.isBuffer(text) ? text : Buffer.from(text);
+  const key = Buffer.from([1, 2, 3, 4]);
+  const header = Buffer.from([0x80 | opcode, (mask ? 0x80 : 0) | payload.length]);
+  const body = mask ? Buffer.from(payload.map((b, i) => b ^ key[i % 4])) : payload;
+
+  return Buffer.concat(mask ? [header, key, body] : [header, body]);
+}
+
+const localOnly = { skip: process.env.TOKEN_SYNC_RELAY_URL ? 'Node relay only' : false };
+
+test('a malformed upgrade followed by a reset does not take the relay down', localOnly, async (t) => {
+  const relay = await startRelay(t);
+  const { room } = relay.createRoom().body;
+  const port = relay.server.address().port;
+  for (let i = 0; i < 20; i += 1) {
+    const socket = await rawSocket(port);
+    socket.write(`GET /rooms/${room}/socket HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    socket.resetAndDestroy();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await fetch(`${relay.http}/rooms/${room}`)).status, 200);
+});
+
+test('a half-closed connection (FIN, no close frame) leaves its room at once', localOnly, async (t) => {
+  const relay = await startRelay(t);
+  const { room } = relay.createRoom().body;
+  const socket = await rawSocket(relay.server.address().port);
+  socket.write(upgradeRequest(room));
+  await until(() => relay.rooms.get(room).sockets.size === 1);
+  socket.end();
+  await until(() => relay.rooms.get(room).sockets.size === 0);
+});
+
+test('a connection that never says hello is dropped', localOnly, async (t) => {
+  const relay = createRelayServer({ helloMs: 50 });
+  await new Promise((resolve) => relay.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => relay.close());
+  const { room } = relay.createRoom().body;
+  const socket = await rawSocket(relay.server.address().port);
+  t.after(() => socket.destroy());
+  socket.write(upgradeRequest(room));
+  await until(() => relay.rooms.get(room).sockets.size === 1);
+  await until(() => relay.rooms.get(room).sockets.size === 0);
+});
+
+test('the handshake answers with the RFC 6455 accept key, and a frame sent with the upgrade is not lost', localOnly, async (t) => {
+  const relay = await startRelay(t);
+  const { room } = relay.createRoom().body;
+  const socket = await rawSocket(relay.server.address().port);
+  t.after(() => socket.destroy());
+  let received = '';
+  socket.on('data', (chunk) => (received += chunk.toString('latin1')));
+  socket.write(Buffer.concat([Buffer.from(upgradeRequest(room)), clientFrame(JSON.stringify({ kind: 'hello' }))]));
+  const expected = createHash('sha1').update('dGhlIHNhbXBsZSBub25jZQ==258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  await until(() => received.includes('welcome'));
+  assert.match(received, new RegExp(`Sec-WebSocket-Accept: ${expected.replace(/[+/=]/g, '\\$&')}`));
+});
+
+test('refuses unmasked frames and invalid UTF-8 with the right close codes', localOnly, async (t) => {
+  const relay = await startRelay(t);
+  const { room } = relay.createRoom().body;
+  for (const [frame, code] of [
+    [clientFrame('{"kind":"hello"}', { mask: false }), 1002],
+    [clientFrame(Buffer.from([0xff, 0xfe, 0xfd])), 1007],
+  ]) {
+    const socket = await rawSocket(relay.server.address().port);
+    t.after(() => socket.destroy());
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    socket.write(upgradeRequest(room));
+    await until(() => Buffer.concat(chunks).includes('101 Switching'));
+    socket.write(frame);
+    await until(() => {
+      const all = Buffer.concat(chunks);
+      const at = all.lastIndexOf(Buffer.from([0x88]));
+
+      return at > -1 && all.length >= at + 4 && all.readUInt16BE(at + 2) === code;
+    });
+  }
+});
+
+test('an oversized POST gets a 413, as the Cloudflare relay answers', localOnly, async (t) => {
+  const relay = await startRelay(t);
+  const res = await fetch(`${relay.http}/rooms`, { method: 'POST', body: JSON.stringify({ room: 'x'.repeat(5000) }) });
+  assert.equal(res.status, 413);
+});

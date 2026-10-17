@@ -59,7 +59,7 @@ A site follows a relay by declaring it in its own markup, next to the drop-in:
 <meta name="token-sync-relay" content="https://relay.example" />
 ```
 
-The relay URL never comes from the address bar, so a crafted link can't point a visitor's tab at someone else's relay. Without the meta tag, the drop-in stays on `BroadcastChannel`.
+The relay URL never comes from the address bar, so a crafted link can't point a visitor's tab at someone else's relay. A link can still put a visitor's tab in any room on *your* relay, and the guardrails are what keep that harmless. Without the meta tag, the drop-in stays on `BroadcastChannel`, and an invalid one is ignored with a console warning.
 
 | Endpoint | Does |
 |---|---|
@@ -81,6 +81,8 @@ The relay is where the rules are enforced for real:
 - **Cloudflare** (`packages/relay/worker/`): a Worker routing to one Durable Object per room. The presenter key and the room's state live in the object's storage, so they survive eviction. Sockets use the hibernation API. A room is deleted a day after its last connection closes.
 
 Both wrap `packages/relay/src/room.js`, so self-hosting changes nothing about the guarantees. The same protocol tests run against either: `npm test` runs them against the Node relay, and `npm run relay:worker` then `npm run relay:worker:test` runs them against the Durable Object under `wrangler dev`.
+
+The demo's latency readout subtracts the relay's timestamp from the viewer's clock. On one machine that's a true delivery time. Across machines it includes clock skew, so the spec's "p95 under 300 ms over the hosted relay" can't be measured until the relay is deployed and measured from one clock.
 
 **The Cloudflare relay has not been deployed.** That's Brad's call: `npm exec --no -w packages/relay -- wrangler deploy` once approved.
 
@@ -140,6 +142,7 @@ Node's built-in test runner. The suites cover the bundler and the built bookmark
 
 Documented per AGENTS.md §1.6:
 
+- **The Node relay is about 400 lines, not 50.** Issue #2 pictured a ~50-line relay on a WebSocket library. Writing the WebSocket server by hand keeps it dependency-free, and moving the rules into a shared core (`src/room.js`) means self-hosting can't weaken them.
 - **Cloudflare, not Netlify, for the relay.** Netlify functions can't hold WebSockets. Cloudflare is already a BFW vendor (bf-brain), and FEATURE-SPEC §7 settles it. `wrangler` is the relay package's only dependency, and it's a dev dependency.
 - **Vanilla JS with no framework, no build and no Eddie runtime dependency** in the packages. They run inside other people's pages, so they carry nothing those pages didn't ask for. The lab's own UI (the demo pages here, and later the remote and the extension popup) is built from Eddie.
 - **Our own bundler instead of a third-party one.** `tools/bundle.js` covers the handful of import/export forms these packages use and refuses the rest, which kept the build free of dependencies. If the packages ever need syntax it refuses, adopting esbuild (pinned) is the move, not stretching the bundler.

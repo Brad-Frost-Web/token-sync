@@ -62,6 +62,15 @@ export default {
   },
 };
 
+/** A socket that's already closing can throw on send; one bad peer must not stop the broadcast. */
+function send(ws, text) {
+  try {
+    ws.send(text);
+  } catch {
+    // Its close handler will tidy up.
+  }
+}
+
 export class TokenSyncRoom {
   /** @param {DurableObjectState} ctx */
   constructor(ctx) {
@@ -124,10 +133,10 @@ export class TokenSyncRoom {
     let changed = false;
     for (const { to, frame } of outbound) {
       const text = JSON.stringify(frame);
-      if (to === 'sender') ws.send(text);
+      if (to === 'sender') send(ws, text);
       else {
         changed = true;
-        for (const other of this.ctx.getWebSockets()) if (other.deserializeAttachment()?.ready) other.send(text);
+        for (const other of this.ctx.getWebSockets()) if (other.deserializeAttachment()?.ready) send(other, text);
       }
     }
     if (changed) await this.ctx.storage.put('snapshot', core.snapshot());
@@ -144,6 +153,11 @@ export class TokenSyncRoom {
     }
     // The alarm checks for open sockets before deleting anything.
     await this.ctx.storage.setAlarm(Date.now() + IDLE_MS);
+  }
+
+  /** A socket that ended in an error gets the same clean-up as one that closed. */
+  async webSocketError(ws) {
+    await this.webSocketClose(ws, 1011, 'error');
   }
 
   async alarm() {

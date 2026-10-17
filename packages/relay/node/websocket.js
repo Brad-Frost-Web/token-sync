@@ -3,9 +3,14 @@
 // close. No dependency.
 //
 // Deliberately refused, with a close code rather than a guess: fragmented
-// messages (1003 — browsers send small messages whole), binary frames (1003),
-// unmasked client frames (1002, the RFC requires masking), and frames larger
-// than `maxPayload` (1009).
+// messages and binary frames (1003 — browsers send small text messages
+// whole), unmasked client frames, reserved bits, unknown opcodes and control
+// frames over 125 bytes (1002), invalid UTF-8 (1007), and frames larger than
+// `maxPayload` (1009).
+//
+// A connection that goes quiet is checked with a ping every `pingMs`; one
+// that hasn't answered anything by the next ping is dropped. A half-closed
+// connection (FIN without a close frame) is dropped at once.
 
 import { createHash } from 'node:crypto';
 
@@ -69,7 +74,7 @@ export function decodeFrames(buffer, maxPayload) {
     cursor += maskBytes;
     const payload = Buffer.from(buffer.subarray(cursor, cursor + length));
     if (mask) for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
-    frames.push({ fin: (first & 0x80) !== 0, opcode: first & 0x0f, masked, payload });
+    frames.push({ fin: (first & 0x80) !== 0, rsv: (first & 0x70) !== 0, opcode: first & 0x0f, masked, payload });
     offset = cursor + length;
   }
 
@@ -82,9 +87,10 @@ export function decodeFrames(buffer, maxPayload) {
  *
  * @param {import('node:http').IncomingMessage} req
  * @param {import('node:stream').Duplex} socket
- * @param {{ maxPayload?: number, onMessage: (text: string) => void, onClose: () => void }} handlers
+ * @param {Buffer} head bytes that arrived with the upgrade request (a pipelined first frame)
+ * @param {{ maxPayload?: number, pingMs?: number, onMessage: (text: string) => void, onClose: () => void }} handlers
  */
-export function acceptWebSocket(req, socket, { maxPayload = 64 * 1024, onMessage, onClose }) {
+export function acceptWebSocket(req, socket, head, { maxPayload = 64 * 1024, pingMs = 30000, onMessage, onClose }) {
   const key = req.headers['sec-websocket-key'];
   if (req.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string') {
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
@@ -97,6 +103,14 @@ export function acceptWebSocket(req, socket, { maxPayload = 64 * 1024, onMessage
 
   let buffered = Buffer.alloc(0);
   let closed = false;
+  let heard = true;
+  const utf8 = new TextDecoder('utf-8', { fatal: true });
+  const ping = setInterval(() => {
+    if (!heard) return socket.destroy();
+    heard = false;
+    socket.write(encodeFrame(OP.ping));
+  }, pingMs);
+  ping.unref?.();
   const close = (code = 1000, reason = '') => {
     if (closed) return;
     closed = true;
@@ -106,26 +120,44 @@ export function acceptWebSocket(req, socket, { maxPayload = 64 * 1024, onMessage
     socket.end(encodeFrame(OP.close, body));
   };
 
-  socket.on('data', (chunk) => {
+  const receive = (chunk) => {
+    heard = true;
     buffered = Buffer.concat([buffered, chunk]);
     const { frames, rest, tooLarge } = decodeFrames(buffered, maxPayload);
     buffered = rest;
     for (const frame of frames) {
       if (closed) return;
+      const control = frame.opcode >= 0x8;
       if (!frame.masked) return close(1002, 'client frames must be masked');
+      if (frame.rsv) return close(1002, 'reserved bits must be zero');
+      if (control && frame.payload.length > 125) return close(1002, 'control frames carry at most 125 bytes');
       if (!frame.fin || frame.opcode === OP.continuation) return close(1003, 'fragmented messages are not supported');
-      if (frame.opcode === OP.text) onMessage(frame.payload.toString('utf8'));
-      else if (frame.opcode === OP.ping) socket.write(encodeFrame(OP.pong, frame.payload));
+      if (frame.opcode === OP.text) {
+        let text;
+        try {
+          text = utf8.decode(frame.payload);
+        } catch {
+          return close(1007, 'text frames must be UTF-8');
+        }
+        onMessage(text);
+      } else if (frame.opcode === OP.ping) socket.write(encodeFrame(OP.pong, frame.payload));
       else if (frame.opcode === OP.close) close(1000);
-      else if (frame.opcode !== OP.pong) return close(1003, 'only text frames are supported');
+      else if (frame.opcode === OP.binary) return close(1003, 'only text frames are supported');
+      else if (frame.opcode !== OP.pong) return close(1002, 'unknown opcode');
     }
     if (tooLarge) close(1009, 'frame too large');
-  });
+  };
+  socket.on('data', receive);
+  // FIN without a close frame (a killed tab, a dropped network): drop it now,
+  // or the half-open socket would sit in its room forever.
+  socket.on('end', () => socket.destroy());
   socket.on('close', () => {
     closed = true;
+    clearInterval(ping);
     onClose();
   });
-  socket.on('error', () => socket.destroy());
+  // Deferred, so the caller has finished wiring up this connection before its first message arrives.
+  if (head?.length) queueMicrotask(() => receive(head));
 
   return {
     send(text) {

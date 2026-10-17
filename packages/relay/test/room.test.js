@@ -76,9 +76,10 @@ test('each connection is held to its message rate', () => {
   const { room, hello, tick } = setup({ maxMessagesPerSecond: 5 });
   const client = hello();
   const results = [];
-  for (let i = 0; i < 8; i += 1) results.push(send(room, client, { op: 'set', from: 'controller', props: { '--a': `${i}px` } })[0]);
-  assert.equal(results.filter((r) => r.to === 'all').length, 5);
-  assert.match(results[7].frame.error, /slow down/);
+  for (let i = 0; i < 8; i += 1) results.push(...send(room, client, { op: 'set', from: 'controller', props: { '--a': `${i}px` } }));
+  // hello spent one of the 5, so 4 sets get through; the flood gets one warning.
+  assert.equal(results.filter((r) => r.to === 'all').length, 4);
+  assert.equal(results.filter((r) => /slow down/.test(r.frame.error ?? '')).length, 1);
   tick(1000);
   assert.equal(send(room, client, { op: 'set', from: 'controller', props: { '--a': '9px' } })[0].to, 'all');
 });
@@ -110,4 +111,23 @@ test('room codes and keys are well formed', () => {
   assert.match(generateRoomCode(), /^[a-z2-9]{6}$/);
   assert.match(generatePresenterKey(), /^[A-Za-z0-9_-]{22}$/);
   assert.notEqual(generatePresenterKey(), generatePresenterKey());
+});
+
+test('a room holds a bounded number of properties', () => {
+  const { room, hello } = setup({ maxMessagesPerSecond: 1000 });
+  const client = hello();
+  for (let batch = 0; batch < 4; batch += 1) {
+    const props = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`--k-${batch}-${i}`, '1px']));
+    assert.equal(send(room, client, { op: 'set', from: 'controller', props })[0].to, 'all');
+  }
+  assert.match(send(room, client, { op: 'set', from: 'controller', props: { '--one-too-many': '1px' } })[0].frame.error, /at most 2000/);
+});
+
+test('junk frames spend from the same bucket, and a flood gets one warning, not one per frame', () => {
+  const { room, hello } = setup({ maxMessagesPerSecond: 5 });
+  const client = hello();
+  const replies = [];
+  for (let i = 0; i < 20; i += 1) replies.push(...room.receive(client, 'not json'));
+  assert.equal(replies.filter((r) => /slow down/.test(r.frame.error)).length, 1);
+  assert.ok(replies.length <= 6);
 });

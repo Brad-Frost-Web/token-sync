@@ -20,11 +20,11 @@ import { acceptWebSocket } from './websocket.js';
 const IDLE_MS = 60 * 60 * 1000;
 
 /**
- * @param {{ idleMs?: number, maxBodyBytes?: number, allowOrigin?: string }} [options]
+ * @param {{ idleMs?: number, helloMs?: number, maxBodyBytes?: number, allowOrigin?: string }} [options]
  *   `allowOrigin`: the CORS origin allowed to create rooms (default `*`: rooms
  *   are anonymous and keys are only ever returned to whoever created the room).
  */
-export function createRelayServer({ idleMs = IDLE_MS, maxBodyBytes = 1024, allowOrigin = '*' } = {}) {
+export function createRelayServer({ idleMs = IDLE_MS, helloMs = 10000, maxBodyBytes = 1024, allowOrigin = '*' } = {}) {
   /** @type {Map<string, { core: ReturnType<typeof createRelayRoom>, sockets: Set<{ send(t: string): void, client: object }>, idle?: NodeJS.Timeout }>} */
   const rooms = new Map();
   const cors = { 'access-control-allow-origin': allowOrigin, 'access-control-allow-headers': 'content-type' };
@@ -51,11 +51,17 @@ export function createRelayServer({ idleMs = IDLE_MS, maxBodyBytes = 1024, allow
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.method === 'POST' && pathname === '/rooms') {
       let body = '';
+      let tooLarge = false;
       req.on('data', (chunk) => {
+        if (tooLarge) return;
         body += chunk;
-        if (body.length > maxBodyBytes) req.destroy();
+        if (body.length > maxBodyBytes) {
+          tooLarge = true;
+          json(res, 413, { error: 'body too large' });
+        }
       });
       req.on('end', () => {
+        if (tooLarge) return;
         let requested;
         try {
           requested = body ? JSON.parse(body).room : undefined;
@@ -76,7 +82,10 @@ export function createRelayServer({ idleMs = IDLE_MS, maxBodyBytes = 1024, allow
   });
 
   const connections = new Set();
-  server.on('upgrade', (req, socket) => {
+  server.on('upgrade', (req, socket, head) => {
+    // First thing: an error on a socket nobody listens to would crash the
+    // process (the HTTP server drops its own listener on upgrade).
+    socket.on('error', () => socket.destroy());
     connections.add(socket);
     socket.on('close', () => connections.delete(socket));
     const { pathname } = new URL(req.url ?? '/', 'http://relay');
@@ -87,9 +96,8 @@ export function createRelayServer({ idleMs = IDLE_MS, maxBodyBytes = 1024, allow
 
       return;
     }
-    clearTimeout(entry.idle);
     const client = entry.core.connect();
-    const peer = acceptWebSocket(req, socket, {
+    const peer = acceptWebSocket(req, socket, head, {
       onMessage(text) {
         for (const { to, frame } of entry.core.receive(client, text)) {
           const out = JSON.stringify(frame);
@@ -103,8 +111,11 @@ export function createRelayServer({ idleMs = IDLE_MS, maxBodyBytes = 1024, allow
       },
     });
     if (!peer) return;
+    clearTimeout(entry.idle);
     const member = { send: peer.send, client, drop: () => socket.destroy() };
     entry.sockets.add(member);
+    // A connection that never says hello is dropped.
+    setTimeout(() => client.ready || socket.destroy(), helloMs).unref();
   });
 
   /** Stop listening and drop every open socket. */

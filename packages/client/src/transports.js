@@ -157,7 +157,9 @@ export function createBroadcastTransport({ room, clock = createClock(), getSnaps
  *
  * Sends made before the relay says welcome are queued, and the socket
  * reconnects with backoff (rejoining picks the state back up from the
- * relay's snapshot).
+ * relay's snapshot, resets and unlocks included). A queued write is stamped
+ * when it reaches the relay, so after an outage it can overwrite a newer
+ * write someone else made meanwhile.
  *
  * @param {{
  *   url: string,
@@ -178,6 +180,8 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
   let closedByUs = false;
   let retry = 0;
   let timer = null;
+  /** Connections in a row that closed before the relay said welcome. */
+  let failures = 0;
 
   const status = (state) => onStatus({ state, presenter });
 
@@ -186,7 +190,6 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
     status('connecting');
     socket = new WebSocketImpl(url);
     socket.addEventListener('open', () => {
-      retry = 0;
       socket.send(JSON.stringify(presenterKey ? { kind: 'hello', key: presenterKey } : { kind: 'hello' }));
     });
     socket.addEventListener('message', (event) => {
@@ -197,6 +200,10 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
         return;
       }
       if (frame?.kind === 'welcome') {
+        // Backoff resets only once the relay has actually let us in: a relay
+        // that accepts and then closes (a deleted room) keeps backing off.
+        retry = 0;
+        failures = 0;
         welcomed = true;
         presenter = frame.presenter === true;
         status('open');
@@ -210,6 +217,10 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
       }
     });
     socket.addEventListener('close', () => {
+      if (!welcomed) {
+        failures += 1;
+        if (failures === 3) onRelayError(`can't join this room on the relay (${url}); check the relay is running and the room exists. Still retrying.`);
+      }
       welcomed = false;
       status('closed');
       if (closedByUs) return;
@@ -223,6 +234,7 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
 
   return {
     publish(msg) {
+      if (closedByUs) return msg;
       if (welcomed) socket.send(JSON.stringify({ kind: 'msg', msg }));
       else {
         queue.push(msg);
@@ -242,9 +254,14 @@ export function createRemoteTransport({ url, presenterKey, WebSocketImpl = globa
       listeners.clear();
       socket?.close();
     },
-    /** Whether the relay accepted this connection's presenter key. */
+    /**
+     * Whether the relay accepted this connection's presenter key. Before the
+     * relay has answered, a transport holding a key assumes yes, so a reset
+     * sent straight after connecting is queued rather than refused here; the
+     * relay still has the final say.
+     */
     get isPresenter() {
-      return presenter;
+      return welcomed ? presenter : Boolean(presenterKey);
     },
   };
 }

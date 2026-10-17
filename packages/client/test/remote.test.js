@@ -92,3 +92,33 @@ test('after the relay drops the connection, the transport reconnects and catches
   writer.session.set({ '--after': '2px' });
   await until(() => viewer.session.props()['--after'] === '2px');
 });
+
+test('a display that drops while the room is locked catches up on the reset and unlock it missed', async (t) => {
+  const { relay, room, presenterKey, url } = await relayWithRoom(t);
+  const presenter = await join(t, url, room, { presenterKey });
+  const display = await join(t, url, room);
+  presenter.session.set({ '--a': '1px' });
+  presenter.session.lock();
+  await until(() => display.session.locked && display.session.props()['--a'] === '1px');
+  // The display's connection drops; while it's gone the presenter resets and unlocks.
+  const [entry] = relay.rooms.values();
+  const displayMember = [...entry.sockets].find((m) => !m.client.presenter);
+  displayMember.drop();
+  await until(() => display.state() !== 'open');
+  presenter.session.reset();
+  presenter.session.unlock();
+  await until(() => display.state() === 'open', 5000);
+  await until(() => !display.session.locked && Object.keys(display.session.props()).length === 0);
+});
+
+test('a presenter can reset straight after connecting, before the relay has answered', async (t) => {
+  const { room, presenterKey, url } = await relayWithRoom(t);
+  const watcher = await join(t, url, room);
+  watcher.session.set({ '--a': '1px' });
+  await until(() => watcher.session.props()['--a'] === '1px');
+  const transport = createRemoteTransport({ url, presenterKey });
+  const presenter = connect({ room, transport });
+  t.after(() => presenter.close());
+  assert.doesNotThrow(() => presenter.reset());
+  await until(() => Object.keys(watcher.session.props()).length === 0);
+});

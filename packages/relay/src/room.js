@@ -21,10 +21,13 @@
 import { createClock } from '../../client/src/transports.js';
 import { createRoomState, validateMessage } from '../../protocol/src/index.js';
 
-export const MAX_FRAME_BYTES = 16 * 1024;
+/** Longest frame accepted, in UTF-16 code units (what `string.length` counts). */
+export const MAX_FRAME_LENGTH = 16 * 1024;
+/** Most distinct custom properties one room may hold, so a room's state (and its stored snapshot) stays bounded. */
+export const MAX_ROOM_KEYS = 2000;
 
 /**
- * @typedef {{ presenter: boolean, ready: boolean, tokens: number, refilled: number }} Client
+ * @typedef {{ presenter: boolean, ready: boolean, tokens: number, refilled: number, warned?: boolean }} Client
  * @typedef {{ to: 'sender' | 'all', frame: object }} Outbound
  */
 
@@ -71,8 +74,12 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
    * @returns {Outbound[]}
    */
   function receive(client, raw) {
+    // Every frame spends from the bucket, junk included, so even error
+    // replies go out at a bounded rate.
+    if (!allow(client)) return client.warned ? [] : ((client.warned = true), error(`slow down: at most ${maxMessagesPerSecond} messages a second`));
+    client.warned = false;
     if (typeof raw !== 'string') return error('frames must be text');
-    if (raw.length > MAX_FRAME_BYTES) return error(`frames may be at most ${MAX_FRAME_BYTES} bytes`);
+    if (raw.length > MAX_FRAME_LENGTH) return error(`frames may be at most ${MAX_FRAME_LENGTH} characters`);
     let frame;
     try {
       frame = JSON.parse(raw);
@@ -92,7 +99,6 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     }
     if (!client.ready) return error('say hello first');
     if (frame?.kind !== 'msg') return error('unknown frame kind');
-    if (!allow(client)) return error(`slow down: at most ${maxMessagesPerSecond} messages a second`);
 
     const { ts: _clientTs, ...unstamped } = frame.msg ?? {};
     const check = validateMessage(unstamped, { requireTs: false });
@@ -101,6 +107,12 @@ export function createRelayRoom({ room, presenterKey, now = () => Date.now(), ma
     if (unstamped.op === 'snapshot') return error('snapshots come from the relay');
     if (unstamped.from === 'presenter' && !client.presenter) return error('only the presenter may speak as presenter');
     if (state.locked && unstamped.op === 'set' && !client.presenter) return error('the room is locked');
+
+    if (unstamped.op === 'set') {
+      const current = state.props();
+      const added = Object.keys(unstamped.props).filter((key) => !(key in current)).length;
+      if (state.size() + added > MAX_ROOM_KEYS) return error(`a room may hold at most ${MAX_ROOM_KEYS} properties`);
+    }
 
     const msg = { ...unstamped, ts: clock.stamp() };
     // The room state also refuses a controller's set while locked; the check

@@ -121,7 +121,9 @@ export function start({
       ),
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
-  const relay = relaySocketUrl(document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content, room);
+  const declared = document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content;
+  const relay = relaySocketUrl(declared, room);
+  if (declared && !relay) console.warn(`token-sync: ignoring <meta name="${RELAY_META}" content="${declared}">: it must be an absolute http(s) or ws(s) URL. Using this browser only.`);
   const channel =
     transport ??
     (relay
@@ -154,5 +156,8 @@ function safeSessionStorage() {
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && !globalThis.TOKEN_SYNC_MANUAL_START) {
-  start();
+  // A classic script in <head> can run before the relay <meta> below it has
+  // been parsed; wait for the document so the meta is always seen.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => start(), { once: true });
+  else start();
 }
