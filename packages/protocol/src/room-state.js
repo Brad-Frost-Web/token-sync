@@ -21,8 +21,21 @@ export function createRoomState() {
   /** @type {Map<string, Entry>} */
   const entries = new Map();
   let resetTs = -Infinity;
-  let lastTs = -Infinity;
   let lock = { locked: false, ts: -Infinity };
+
+  /** Last-write-wins merge of `props` written at `ts`. Returns the keys whose value changed. */
+  function merge(props, ts) {
+    const changed = [];
+    for (const [key, value] of Object.entries(props)) {
+      const current = entries.get(key);
+      if (!current || ts > current.ts || (ts === current.ts && value > current.value)) {
+        if (!current || current.value !== value) changed.push(key);
+        entries.set(key, { value, ts });
+      }
+    }
+
+    return changed;
+  }
 
   /**
    * Fold one validated, stamped message into the state.
@@ -31,23 +44,14 @@ export function createRoomState() {
    */
   function apply(msg) {
     const { op, ts } = msg;
-    lastTs = Math.max(lastTs, ts);
 
     if (op === 'set') {
       if (lock.locked && msg.from === 'controller') {
         return { applied: false, reason: 'room is locked', changed: [] };
       }
       if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
-      const changed = [];
-      for (const [key, value] of Object.entries(msg.props ?? {})) {
-        const current = entries.get(key);
-        if (!current || ts > current.ts || (ts === current.ts && value > current.value)) {
-          if (!current || current.value !== value) changed.push(key);
-          entries.set(key, { value, ts });
-        }
-      }
 
-      return { applied: true, changed };
+      return { applied: true, changed: merge(msg.props ?? {}, ts) };
     }
 
     if (op === 'reset') {
@@ -76,21 +80,15 @@ export function createRoomState() {
     }
 
     if (op === 'snapshot') {
-      // A snapshot is the whole state as of `ts`. It only lands if it is at
-      // least as new as everything this peer has seen — so a late joiner takes
-      // it, and an up-to-date peer hearing a duplicate is unaffected.
-      if (ts < lastTs) return { applied: false, reason: 'older than this state', changed: [] };
-      const next = msg.props ?? {};
-      const changed = [];
-      for (const key of entries.keys()) if (!(key in next)) changed.push(key);
-      for (const [key, value] of Object.entries(next)) {
-        if (entries.get(key)?.value !== value) changed.push(key);
-      }
-      entries.clear();
-      for (const [key, value] of Object.entries(next)) entries.set(key, { value, ts });
-      resetTs = Math.max(resetTs, ts);
+      // A snapshot is this room's state as the sender knew it at `ts` — the
+      // newest write it had seen, not the moment it replied. It merges key by
+      // key under the same last-write-wins rule as a set, and never clears:
+      // a late joiner fills in, and a peer that already has a newer write to
+      // a key keeps it. (Replacing the state instead let one tab's reply to
+      // another tab's "hello" wipe a write made in the same moment.)
+      if (ts <= resetTs) return { applied: false, reason: 'older than the last reset', changed: [] };
 
-      return { applied: true, changed };
+      return { applied: true, changed: merge(msg.props ?? {}, ts) };
     }
 
     return { applied: false, reason: `unknown op ${op}`, changed: [] };
@@ -101,10 +99,23 @@ export function createRoomState() {
     return Object.fromEntries([...entries].map(([key, entry]) => [key, entry.value]));
   }
 
-  /** The messages that bring a late joiner up to date. */
+  /**
+   * The messages that bring a late joiner up to date, already stamped with the
+   * times this state learned them. Nothing, if this state has seen nothing.
+   */
   function snapshotMessages(room) {
-    const messages = [createMessage({ room, op: 'snapshot', from: 'source', props: props() })];
-    if (lock.locked) messages.push(createMessage({ room, op: 'lock', from: 'presenter' }));
+    // One message per distinct write time, so every key keeps the timestamp
+    // it was really written at. Promoting an old key to a newer ts would let
+    // it beat a write the joiner made a moment after joining.
+    const byTs = new Map();
+    for (const [key, entry] of entries) {
+      if (!byTs.has(entry.ts)) byTs.set(entry.ts, {});
+      byTs.get(entry.ts)[key] = entry.value;
+    }
+    const messages = [...byTs]
+      .sort(([a], [b]) => a - b)
+      .map(([ts, group]) => ({ ...createMessage({ room, op: 'snapshot', from: 'source', props: group }), ts }));
+    if (lock.locked) messages.push({ ...createMessage({ room, op: 'lock', from: 'presenter' }), ts: lock.ts });
 
     return messages;
   }

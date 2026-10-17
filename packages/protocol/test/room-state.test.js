@@ -70,17 +70,37 @@ test('a snapshot brings a late joiner up to date, including the lock', () => {
   const host = createRoomState();
   host.apply(set({ '--brand': 'blue', '--radius': '4px' }, 10));
   host.apply(op('lock', 11));
+  host.apply(set({ '--radius': '8px' }, 12, 'presenter')); // presenters write through a lock
   const joiner = createRoomState();
-  let ts = 12;
-  for (const msg of host.snapshotMessages('r')) joiner.apply({ ...msg, ts: ts++ });
+  const messages = host.snapshotMessages('r');
+  // One snapshot per write time, each carrying the time the write happened.
+  assert.deepEqual(
+    messages.map((m) => [m.op, m.ts]),
+    [['snapshot', 10], ['snapshot', 12], ['lock', 11]],
+  );
+  for (const msg of messages) joiner.apply(msg);
   assert.deepEqual(joiner.props(), host.props());
   assert.equal(joiner.locked, true);
 });
 
-test('a stale snapshot does not roll back a peer that has seen newer writes', () => {
+test('a snapshot merges and never wipes a newer write (the hello-reply race)', () => {
+  // Tab A writes at 50. Tab B, answering some other tab's hello, replies with
+  // what it knew — written at 40. The reply lands on A after A's own write.
+  const a = createRoomState();
+  a.apply(set({ '--brand': 'blue', '--radius': '4px' }, 40));
+  a.apply(set({ '--brand': 'green' }, 50));
+  a.apply({ v: 1, room: 'r', op: 'snapshot', from: 'source', props: { '--brand': 'blue', '--radius': '4px' }, ts: 40 });
+  assert.deepEqual(a.props(), { '--brand': 'green', '--radius': '4px' });
+});
+
+test('an empty room sends no snapshot', () => {
+  assert.deepEqual(createRoomState().snapshotMessages('r'), []);
+});
+
+test('a snapshot older than the last reset is dropped', () => {
   const state = createRoomState();
-  state.apply(set({ '--brand': 'blue' }, 30));
+  state.apply(op('reset', 30));
   const result = state.apply({ v: 1, room: 'r', op: 'snapshot', from: 'source', props: { '--brand': 'red' }, ts: 20 });
   assert.equal(result.applied, false);
-  assert.deepEqual(state.props(), { '--brand': 'blue' });
+  assert.deepEqual(state.props(), {});
 });
