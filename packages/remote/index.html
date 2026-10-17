@@ -24,6 +24,9 @@
             <ed-section align="left">
               <ed-heading slot="header" tagName="h2">Room</ed-heading>
               <ed-text-passage slot="header"><p id="status" role="status">Connecting…</p></ed-text-passage>
+              <noscript>
+                <ed-text-passage><p>The remote needs JavaScript to join the room.</p></ed-text-passage>
+              </noscript>
             </ed-section>
 
             <ed-section align="left">
@@ -66,34 +69,61 @@
 
     <script type="module">
       import { connect, createCoalescer, createRemoteTransport } from '../client/src/index.js';
-      import { remoteSettings, statusMessage } from './src/remote.js';
+      import { RESET_MESSAGE, remoteSettings, statusMessage } from './src/remote.js';
 
       const status = document.getElementById('status');
-      const fields = ['button', 'background', 'radius'].map((id) => document.getElementById(id));
-      const settings = remoteSettings(location.search);
+      const say = (text) => {
+        // Only a new sentence is worth announcing; repeating one is noise.
+        if (status.textContent !== text) status.textContent = text;
+      };
+      const pickers = ['button', 'background'].map((id) => document.getElementById(id));
+      const radius = document.getElementById('radius');
+      const RADIUS = '--ed-theme-border-radius-md';
+      const radiusNote = (px) => (radius.fieldNote = `Now ${px} px. 0 is square, 24 is very round.`);
+      const settings = remoteSettings(location.search, location.protocol);
       if (!settings.ok) {
-        status.textContent = settings.error;
+        say(settings.error);
       } else {
         let connection = 'connecting';
         let locked = false;
+        let everConnected = false;
+        let failed = false;
         const show = () => {
-          status.textContent = statusMessage({ room: settings.room, connection, locked });
-          for (const field of fields) field.disabled = connection !== 'open' || locked;
+          say(statusMessage({ room: settings.room, connection, locked, everConnected, failed }));
+          for (const field of [...pickers, radius]) field.disabled = connection !== 'open' || locked;
+        };
+        /** Make every control show what the room holds now. */
+        const reflect = (props) => {
+          for (const picker of pickers) {
+            const value = props[picker.getAttribute('name')];
+            if (value && picker.value !== value) picker.value = value;
+          }
+          const px = Number.parseFloat(props[RADIUS] ?? '0');
+          if (Number.isFinite(px) && String(radius.value) !== String(px)) radius.value = String(px);
+          radiusNote(Number.isFinite(px) ? px : 0);
         };
         const transport = createRemoteTransport({
           url: settings.socket,
           onStatus: ({ state }) => {
+            if (state === 'open') everConnected = true;
+            if (state === 'closed' && !everConnected) failed = true;
+            // A retry after a failure isn't news: keep saying we can't reach it.
+            if (state === 'connecting' && failed && !everConnected) return;
             connection = state;
             show();
           },
-          onRelayError: (message) => (status.textContent = `The room didn't take that: ${message}`),
+          onRelayError: (message) => say(`The room didn't take that: ${message}`),
         });
         const session = connect({
           room: settings.room,
           transport,
           role: 'controller',
-          onChange: ({ locked: now }) => {
-            if (now !== locked) {
+          onChange: ({ locked: now, message, props }) => {
+            reflect(props);
+            if (message.op === 'reset' && everConnected) {
+              outbox.forget();
+              say(RESET_MESSAGE);
+            } else if (now !== locked) {
               locked = now;
               show();
             }
@@ -101,26 +131,28 @@
         });
         // At most 10 messages a second however fast a slider moves (spec §8).
         const outbox = createCoalescer((props) => session.set(props));
+        addEventListener('pagehide', () => outbox.flush());
 
         await customElements.whenDefined('ed-color-picker');
-        const swatches = [
+        const swatches = (list) => list.map(([label, color]) => ({ value: color, color, label }));
+        pickers[0].palette = swatches([
           ['Tomato', '#c0392b'],
           ['Ocean', '#1b4dd8'],
           ['Forest', '#2e7d32'],
           ['Plum', '#6a1b9a'],
           ['Teal', '#00796b'],
           ['Ink', '#283593'],
-        ];
-        document.getElementById('button').palette = swatches.map(([label, color]) => ({ value: color, color, label }));
-        document.getElementById('background').palette = [
+        ]);
+        pickers[1].palette = swatches([
           ['Paper', '#fbfaf5'],
           ['Sky', '#e8eefc'],
           ['Mint', '#e6f4ea'],
           ['Blush', '#fbe9e7'],
           ['Sand', '#f6f0dc'],
-        ].map(([label, color]) => ({ value: color, color, label }));
+        ]);
+        reflect(session.props());
 
-        for (const picker of fields.slice(0, 2)) {
+        for (const picker of pickers) {
           const name = picker.getAttribute('name');
           picker.addEventListener('input', (event) => event.detail?.value && outbox.push({ [name]: event.detail.value }));
           picker.addEventListener('change', (event) => {
@@ -129,12 +161,12 @@
             outbox.flush();
           });
         }
-        const radius = document.getElementById('radius');
         radius.addEventListener('input', (event) => {
-          const value = event.composedPath()[0]?.value;
-          if (value !== undefined) outbox.push({ '--ed-theme-border-radius-md': `${value}px` });
+          const value = event.target.value;
+          if (value === undefined) return;
+          radiusNote(value);
+          outbox.push({ [RADIUS]: `${value}px` });
         });
-        window.tokenSyncRemote = session;
       }
     </script>
   </body>

@@ -37,18 +37,50 @@ test('the first change goes at once, and keys changed together travel together',
   }
 });
 
-test('flush() sends what is queued now', () => {
+test('flush() never beats the rate cap: 50 committed taps in a second still send at most 10', () => {
   mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
     const sent = [];
-    const c = createCoalescer((props) => sent.push(props), { timers: timers() });
-    c.push({ '--a': '1px' });
-    c.push({ '--a': '2px' });
-    c.flush();
-    assert.deepEqual(sent, [{ '--a': '1px' }, { '--a': '2px' }]);
+    const c = createCoalescer((props) => sent.push(Date.now()), { timers: timers() });
+    for (let i = 0; i < 50; i += 1) {
+      c.push({ '--a': `${i}px` });
+      c.flush();
+      mock.timers.tick(20);
+    }
     mock.timers.tick(500);
-    assert.equal(sent.length, 2);
+    for (const at of sent) assert.ok(sent.filter((t) => t >= at && t < at + 1000).length <= 10);
   } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a commit repeating the value just sent sends nothing more', () => {
+  const sent = [];
+  const c = createCoalescer((props) => sent.push(props));
+  c.push({ '--a': '#000000' }); // input
+  c.push({ '--a': '#000000' }); // change, same value
+  c.flush();
+  assert.equal(sent.length, 1);
+});
+
+test('a send that throws keeps the values for the next try', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const sent = [];
+    let fail = true;
+    const c = createCoalescer((props) => {
+      if (fail) throw new Error('offline');
+      sent.push(props);
+    }, { timers: timers() });
+    c.push({ '--a': '1px' });
+    fail = false;
+    c.push({ '--b': '2px' });
+    mock.timers.tick(200);
+    assert.deepEqual(sent, [{ '--a': '1px', '--b': '2px' }]);
+  } finally {
+    console.warn = warn;
     mock.timers.reset();
   }
 });

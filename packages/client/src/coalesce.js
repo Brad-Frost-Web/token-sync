@@ -13,8 +13,11 @@ export function createCoalescer(send, {
   maxPerSecond = 10,
   timers = { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(/** @type {any} */ (id)) },
 } = {}) {
+  if (!(maxPerSecond > 0)) throw new Error('token-sync: maxPerSecond must be a positive number');
   const interval = 1000 / maxPerSecond;
   let pending = {};
+  /** The last value sent for each key, so a commit repeating it sends nothing. */
+  const sent = {};
   let last = -Infinity;
   let timer = null;
 
@@ -24,22 +27,40 @@ export function createCoalescer(send, {
     pending = {};
     if (!Object.keys(props).length) return;
     last = timers.now();
-    send(props);
+    try {
+      send(props);
+      Object.assign(sent, props);
+    } catch (error) {
+      // Keep the values for the next try rather than losing them.
+      pending = { ...props, ...pending };
+      console.warn(`token-sync: couldn't send — ${error.message}`);
+    }
+  }
+
+  function schedule() {
+    if (timer !== null) return;
+    const wait = last + interval - timers.now();
+    if (wait <= 0) flush();
+    else timer = timers.setTimeout(flush, wait);
   }
 
   return {
     /** Queue these values; they go out in the next free slot, merged with anything else queued. */
     push(props) {
-      Object.assign(pending, props);
-      if (timer !== null) return;
-      const wait = last + interval - timers.now();
-      if (wait <= 0) flush();
-      else timer = timers.setTimeout(flush, wait);
+      for (const [key, value] of Object.entries(props)) {
+        if (sent[key] === value && !(key in pending)) continue;
+        pending[key] = value;
+      }
+      schedule();
     },
-    /** Send anything queued now (on a committed change, or before leaving). */
-    flush() {
-      if (timer !== null) timers.clearTimeout(timer);
-      flush();
+    /**
+     * Send what's queued as soon as the rate allows: now if a slot is free,
+     * otherwise at the next one. Never faster than `maxPerSecond`.
+     */
+    flush: schedule,
+    /** Forget what was sent (after a reset, the room no longer holds those values). */
+    forget() {
+      for (const key of Object.keys(sent)) delete sent[key];
     },
   };
 }

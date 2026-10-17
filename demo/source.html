@@ -50,9 +50,11 @@
             <ed-section align="left">
               <ed-heading slot="header" tagName="h2">Room</ed-heading>
               <ed-text-passage slot="header"><p id="status" role="status">Connecting…</p></ed-text-passage>
-              <ed-text-passage id="remote" hidden>
-                <p>Phone remote for this room: <a id="remote-link" href="#">open the remote</a>. Share this link with the audience.</p>
-              </ed-text-passage>
+              <template id="remote-template">
+                <ed-text-passage>
+                  <p>Phone remote for this room: <a href="">open the remote</a>. Share this link with the audience.</p>
+                </ed-text-passage>
+              </template>
               <ed-cluster gap="inline">
                 <ed-button
                   variant="primary"
@@ -71,6 +73,7 @@
 
     <script type="module">
       import { connect, createRemoteTransport } from '../packages/client/src/index.js';
+      import { relayEndpoint, remoteLink } from '../packages/remote/src/remote.js';
       import { checkValue, inferType } from '../packages/protocol/src/index.js';
 
       const status = document.getElementById('status');
@@ -83,9 +86,9 @@
       let room = 'demo';
       let transport = 'broadcast';
       if (relay) {
-        const created = await (await fetch(new URL('/rooms', relay), { method: 'POST' })).json();
+        const created = await (await fetch(relayEndpoint(relay, 'rooms'), { method: 'POST' })).json();
         room = created.room;
-        const socket = new URL(`/rooms/${room}/socket`, relay);
+        const socket = relayEndpoint(relay, `rooms/${room}/socket`);
         socket.protocol = socket.protocol === 'https:' ? 'wss:' : 'ws:';
         transport = createRemoteTransport({
           url: socket.href,
@@ -94,10 +97,11 @@
           onRelayError: (message) => say(`The relay refused that: ${message}`),
         });
         document.querySelector('ed-button[target="_blank"]').href = `target.html?token-sync=${room}&relay=${encodeURIComponent(relay)}`;
-        const remoteHref = new URL('../packages/remote/index.html', location.href);
-        remoteHref.search = new URLSearchParams({ room, relay }).toString();
-        document.getElementById('remote-link').href = remoteHref.href;
-        document.getElementById('remote').hidden = false;
+        // Shown only in relay mode: there's no remote without a relay.
+        const template = document.getElementById('remote-template');
+        const block = template.content.cloneNode(true);
+        block.querySelector('a').href = remoteLink({ base: new URL('../packages/remote/index.html', location.href).href, room, relay });
+        template.replaceWith(block);
       }
       const session = connect({
         room,

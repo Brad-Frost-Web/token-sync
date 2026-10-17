@@ -95,7 +95,9 @@ With a relay running, open the source page with `?relay=…`. It creates a room 
 The remote is an Eddie page that joins the room as a controller. Anyone holding it can change the button colour, the page background and the corner roundness on the big screen; the last change wins.
 
 - **Coalesced sends.** However fast someone drags a slider, the remote sends at most 10 messages a second (FEATURE-SPEC §8, `createCoalescer` in `client`).
-- **Status the controls can explain.** A polite live region says when it's joining, connected, reconnecting, or paused. When the presenter locks the room, the controls are disabled and the remote says why.
+- **Status the controls can explain.** A polite live region says when it's joining, connected, reconnecting, unable to reach the room, paused, or reset. When the presenter locks the room, the controls are disabled and the remote says why.
+- **Controls show the room as it stands.** A remote that joins late, or hears a reset, moves its controls to the room's current values.
+- **Deferred:** a QR code and a short URL for the room (#18). For now the presenter shares the link.
 - **One known gap:** Eddie's colour swatches and slider thumb are smaller than the spec's 44 px phone target. They meet WCAG 2.5.8's 24 px. That's filed upstream (#16, Brad-Frost-Web/eddie-design-system#2457) rather than patched over with custom CSS.
 
 Once Eddie's #2447 lands, the remote can host `ed-r-theme-customizer mode="controller"` instead.
