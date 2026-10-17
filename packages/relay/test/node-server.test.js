@@ -1,12 +1,18 @@
 // Runs the real Node relay on a random port and talks to it with Node's own
 // WebSocket client — the handshake and framing are tested against a real
 // implementation, not against our idea of one (AGENTS.md §2.13).
+//
+// TOKEN_SYNC_RELAY_URL=http://127.0.0.1:8788 runs the same tests against
+// another relay instead — `npm run relay:worker:test` points them at the
+// Durable Object under `wrangler dev`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRelayServer } from '../node/server.js';
 
 async function startRelay(t) {
+  const external = process.env.TOKEN_SYNC_RELAY_URL;
+  if (external) return { http: external.replace(/\/$/, ''), ws: external.replace(/^http/, 'ws').replace(/\/$/, '') };
   const relay = createRelayServer();
   await new Promise((resolve) => relay.server.listen(0, '127.0.0.1', resolve));
   t.after(() => relay.close());
@@ -52,9 +58,10 @@ test('POST /rooms creates a room and hands back its presenter key', async (t) =>
 
 test('a chosen room code works once, then conflicts', async (t) => {
   const relay = await startRelay(t);
-  const first = await fetch(`${relay.http}/rooms`, { method: 'POST', body: JSON.stringify({ room: 'detach' }) });
+  const name = `detach-${Date.now()}`; // unique, so the test can rerun against a long-lived relay
+  const first = await fetch(`${relay.http}/rooms`, { method: 'POST', body: JSON.stringify({ room: name }) });
   assert.equal(first.status, 201);
-  const again = await fetch(`${relay.http}/rooms`, { method: 'POST', body: JSON.stringify({ room: 'detach' }) });
+  const again = await fetch(`${relay.http}/rooms`, { method: 'POST', body: JSON.stringify({ room: name }) });
   assert.equal(again.status, 409);
 });
 

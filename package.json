@@ -10,10 +10,13 @@
   ],
   "scripts": {
     "start": "node demo/server.js",
+    "relay": "node packages/relay/node/server.js",
     "build": "node tools/build.js",
     "test": "node --test \"packages/*/test/*.test.js\" \"tools/test/*.test.js\"",
     "bfw:ship": "bfw-process verify-phase ship",
-    "bfw:verify:tests": "npm test"
+    "bfw:verify:tests": "npm test",
+    "relay:worker": "npm exec --no -w packages/relay -- wrangler dev --port 8788 --ip 127.0.0.1",
+    "relay:worker:test": "TOKEN_SYNC_RELAY_URL=http://127.0.0.1:8788 node --test packages/relay/test/node-server.test.js"
   },
   "devDependencies": {
     "@brad-frost-web/bfw-process": "0.25.0"

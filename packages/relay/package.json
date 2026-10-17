@@ -4,5 +4,8 @@
   "private": true,
   "description": "Token Sync rooms: one Cloudflare Durable Object per room, and a dependency-free Node reference relay. Both wrap src/room.js.",
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
 }

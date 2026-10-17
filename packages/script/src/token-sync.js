@@ -10,11 +10,39 @@
 // Preview only: it changes this tab's custom properties and nothing else.
 // Real visitors never carry the parameter, so they never see a change.
 
-import { connect, createApplier } from '../../client/src/index.js';
+import { connect, createApplier, createRemoteTransport } from '../../client/src/index.js';
 import { isRoom } from '../../protocol/src/index.js';
 
 export const PARAM = 'token-sync';
 export const STORAGE_KEY = 'token-sync:room';
+/** `<meta name="token-sync-relay" content="https://relay.example">` points the page at a relay. */
+export const RELAY_META = 'token-sync-relay';
+
+/**
+ * The socket URL for a room on a relay, or null when `base` isn't an
+ * http(s)/ws(s) URL. The relay comes from the page's own markup, never from
+ * the address bar: a crafted link must not be able to point a visitor's tab
+ * at someone else's relay.
+ * @param {string | null | undefined} base
+ * @param {string} room
+ */
+export function relaySocketUrl(base, room) {
+  if (!base) return null;
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    return null;
+  }
+  const schemes = { 'http:': 'ws:', 'https:': 'wss:', 'ws:': 'ws:', 'wss:': 'wss:' };
+  if (!(url.protocol in schemes)) return null;
+  url.protocol = schemes[url.protocol];
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/rooms/${encodeURIComponent(room)}/socket`;
+  url.search = '';
+  url.hash = '';
+
+  return url.href;
+}
 
 /**
  * Which room, if any, this tab should be in. The URL wins; otherwise the room
@@ -49,6 +77,9 @@ export function resolveRoom({ search, storage }) {
  * Join the room named by the URL or the session — or `room`, when a caller
  * such as the bookmarklet names one — and apply it to this page. A tab is in
  * one room at a time: starting again leaves the previous room first.
+ * The page talks to a relay when it declares one with
+ * `<meta name="token-sync-relay" content="…">`, and over BroadcastChannel
+ * (this browser only) when it doesn't.
  * @param {{ room?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object }} [context]
  */
 export function start({
@@ -56,7 +87,7 @@ export function start({
   location = globalThis.location,
   storage = safeSessionStorage(),
   document = globalThis.document,
-  transport = 'broadcast',
+  transport,
 } = {}) {
   if (requested !== undefined && requested !== 'off' && !isRoom(requested)) {
     // Refuse before touching anything: a typo must not silently drop the room
@@ -90,9 +121,15 @@ export function start({
       ),
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
+  const relay = relaySocketUrl(document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content, room);
+  const channel =
+    transport ??
+    (relay
+      ? createRemoteTransport({ url: relay, onRelayError: (message) => console.warn(`token-sync: the relay said: ${message}`) })
+      : 'broadcast');
   const session = connect({
     room,
-    transport,
+    transport: channel,
     role: 'controller',
     applier,
     onChange: ({ message }) => {

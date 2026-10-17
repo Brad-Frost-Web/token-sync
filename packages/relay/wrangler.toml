@@ -1,0 +1,13 @@
+# The hosted Token Sync relay. Local only until Brad approves the first deploy:
+#   npm run relay:worker   → wrangler dev on http://127.0.0.1:8788
+name = "token-sync-relay"
+main = "worker/index.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "TokenSyncRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TokenSyncRoom"]
