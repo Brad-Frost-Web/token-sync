@@ -18,7 +18,7 @@ npm start
 2. Select **Open the target page**.
 3. Change the button colour, page background or corner radius on the source. The target follows, and its status line says how many milliseconds it took.
 4. On the target, hold <kbd>\</kbd> to see the page without the room's tokens. Let go to see them again.
-5. On the source, **Reset every tab** puts the target back. **Lock the room** stops other senders until you unlock it.
+5. On the source, **Reset every tab** puts the target back. (Locking a room only means something on a relay, where there are senders to lock out: test 3.)
 
 ## 2. Eddie's theme customizer driving a page (10 minutes the first time)
 
@@ -54,7 +54,7 @@ Both print an address like `http://192.168.1.20:…`. If they print more than on
 2. Select **Open the target page** on the Mac.
 3. Get the phone remote link to your phone (AirDrop, or copy it into a message to yourself), and open it there.
 4. Move the controls on the phone. The target on the Mac follows.
-5. On the Mac's source, **Lock the room**: the phone's controls disable and say why. **Unlock** gives them back.
+5. On the Mac's source, **Lock the room**: the phone's controls disable and say why. Select **Lock the room** again to unlock.
 
 ## 4. Your own token file (5 minutes)
 
@@ -91,7 +91,7 @@ npm run relay
 1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, select **Load unpacked**, and pick `dist/extension/`. (Reload it there after rebuilding.)
 2. Open a site, open the extension's popup, and enter a relay room code from test 3 or 4 and the relay (`http://127.0.0.1:8787`).
 3. Select **Preview this tab in the room**, and allow the site when Chrome asks.
-4. Send changes from the source page, the phone remote or the CLI.
+4. Send changes from the source page (opened with `?relay=http://127.0.0.1:8787`, in the same room), the phone remote or the CLI.
 
 ## 7. Theme scope (2 minutes)
 
@@ -105,5 +105,6 @@ The target page wears `bfw`. An edit made for another theme is kept but not show
 - **A real site can't join the local relay.** Chrome's Local Network Access permission: allow "apps and services on this device" for that site.
 - **The target doesn't follow.** Check that both tabs show the same room code, and, for relay rooms, that the relay is running. The target's console says why it dropped a message.
 - **The customizer page shows build instructions.** Run `npm run eddie:develop`.
+- **The phone can't load the page.** macOS may be blocking incoming connections: allow `node` when macOS asks, or in System Settings › Network › Firewall. Check the phone is on the same wifi as the Mac.
 - **A port is taken.** `PORT=4322 npm start`, or `npm run relay -- --port 8790`.
 - **Stop everything.** <kbd>Ctrl</kbd>+<kbd>C</kbd> in each terminal.

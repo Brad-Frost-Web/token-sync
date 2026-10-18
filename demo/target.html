@@ -16,7 +16,12 @@
       <meta name="token-sync-relay" content="https://…">, never from the URL.
     -->
     <script type="module">
-      const relay = new URLSearchParams(location.search).get('relay') ?? sessionStorage.getItem('token-sync:demo-relay');
+      // Remembered while you click around, and forgotten when a URL names a room
+      // with no relay — so a tab used for a relay room doesn't silently stay
+      // on the relay when you reopen it for a same-browser room.
+      const params = new URLSearchParams(location.search);
+      if (params.has('token-sync') && !params.has('relay')) sessionStorage.removeItem('token-sync:demo-relay');
+      const relay = params.get('relay') ?? sessionStorage.getItem('token-sync:demo-relay');
       if (relay) {
         sessionStorage.setItem('token-sync:demo-relay', relay);
         document.head.append(Object.assign(document.createElement('meta'), { name: 'token-sync-relay', content: relay }));

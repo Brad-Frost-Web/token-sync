@@ -67,7 +67,8 @@ const TYPES = {
 };
 
 const server = createServer(async (req, res) => {
-  const { pathname } = new URL(req.url ?? '/', `http://${HOST}`);
+  // A fixed base: HOST may be an IPv6 address (::), which isn't a valid URL host as written.
+  const { pathname } = new URL(req.url ?? '/', 'http://localhost');
   if (pathname === '/') {
     res.writeHead(302, { location: '/demo/source.html' }).end();
 
@@ -82,9 +83,12 @@ const server = createServer(async (req, res) => {
 
     return;
   }
-  if (decoded in GENERATED) {
+  // Matched without case: macOS serves /demo/Customizer.html from the same
+  // file, and that must not skip the generated route.
+  const generated = Object.keys(GENERATED).find((path) => path.toLowerCase() === decoded.toLowerCase());
+  if (generated) {
     try {
-      const { type, body } = await GENERATED[decoded]();
+      const { type, body } = await GENERATED[generated]();
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
     } catch (error) {
       res.writeHead(500, { 'content-type': 'text/plain' }).end(`Build failed: ${error.message}`);
@@ -116,13 +120,14 @@ function lanAddresses(interfaces = networkInterfaces()) {
 }
 
 server.listen(PORT, HOST, () => {
-  const open = HOST === '0.0.0.0' ? '127.0.0.1' : HOST;
+  const everywhere = HOST === '0.0.0.0' || HOST === '::';
+  const open = everywhere ? '127.0.0.1' : HOST.includes(':') ? `[${HOST}]` : HOST;
   console.log(`Token Sync demo: http://${open}:${PORT}/`);
   console.log(`  source: http://${open}:${PORT}/demo/source.html`);
   console.log(`  target: http://${open}:${PORT}/demo/target.html?token-sync=demo`);
   console.log(`  bookmarklet: http://${open}:${PORT}/demo/bookmarklet.html`);
   console.log(`  customizer: http://${open}:${PORT}/demo/customizer.html (needs a local Eddie build, see TESTING.md)`);
-  if (HOST === '0.0.0.0') {
+  if (everywhere) {
     console.log('  Reachable from your local network. On a phone on the same wifi, open:');
     for (const address of lanAddresses()) console.log(`    http://${address}:${PORT}/`);
   }
