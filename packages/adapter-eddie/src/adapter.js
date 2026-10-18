@@ -129,6 +129,8 @@ export function createEddieAdapter({ readComputed }) {
     const problems = [];
     let knobs = 0;
     let unchecked = 0;
+    /** Contract colours set to contrast-color(): they pick their own contrast, so the solver leaves them be. */
+    const selfContrasting = new Set();
 
     for (const [key, value] of Object.entries(props)) {
       const name = (key.startsWith(PREFIX) && contractPathProperty(key)) || key;
@@ -156,7 +158,9 @@ export function createEddieAdapter({ readComputed }) {
       if (colourPath && hex) onContract[colourPath] = hex;
       else {
         passthrough[name] = value;
-        if (colourPath) problems.push(`Couldn't contrast-check ${name}: only hex colours can be checked, so ${value} was applied as sent.`);
+        // contrast-color() picks the contrasting colour itself: nothing to check.
+        if (colourPath && /^contrast-color\(/i.test(value.trim())) selfContrasting.add(colourPath);
+        else if (colourPath) problems.push(`Couldn't contrast-check ${name}: only hex colours can be checked, so ${value} was applied as sent.`);
         else if (!path && isColourName(name)) unchecked += 1;
       }
     }
@@ -175,11 +179,12 @@ export function createEddieAdapter({ readComputed }) {
 
     const out = { ...passthrough };
     for (const [path, value] of Object.entries(solved)) {
+      if (selfContrasting.has(path)) continue;
       if (baseline[path] !== value || path in onContract) out[pathToCustomProperty(path)] = value;
     }
 
-    const moved = report.moved.filter((m) => baseline[m.path] !== solved[m.path]).map(describeMove);
-    for (const u of report.unresolved) problems.push(`Couldn't keep ${readable(u.path)} readable on every background it sits on.`);
+    const moved = report.moved.filter((m) => !selfContrasting.has(m.path) && baseline[m.path] !== solved[m.path]).map(describeMove);
+    for (const u of report.unresolved.filter((entry) => !selfContrasting.has(entry.path))) problems.push(`Couldn't keep ${readable(u.path)} readable on every background it sits on.`);
     for (const skip of report.skipped ?? []) problems.push(`Couldn't contrast-check ${skip.label ?? readable(skip.fgPath ?? skip.path ?? '')}: one of its colours isn't a hex value.`);
 
     return { props: out, refused, status: { moved, problems, unchecked } };

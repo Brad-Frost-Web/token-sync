@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- eddie-template: ed-p-form — the form-page shape without the site shell: this is a lab demo, not a site page -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync — Eddie customizer</title>
+    <!-- Eddie develop, built locally by npm run eddie:develop: the customizer's room support (#2447) is not in a release yet. -->
+    <link rel="stylesheet" href="/.eddie-develop/dist/eddie-design-tokens/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="/.eddie-develop/dist/eddie-design-tokens/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="/.eddie-develop/dist/eddie-design-tokens/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="/.eddie-develop/dist/eddie-design-tokens/core/css/base.css" />
+    <script type="module" src="/.eddie-develop/dist/eddie-web-components/cdn/eddie.js"></script>
+    <script type="module" src="/.eddie-develop/dist/eddie-recipes/cdn/recipes/tools/theme-customizer/theme-customizer.js"></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main>
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Eddie's theme customizer, in a room</h1></ed-heading>
+              Every change you make here goes to room “demo”. Open the target page in another tab and watch it follow.
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Customizer</ed-heading>
+              <ed-text-passage slot="header">
+                <p>A controller: it previews its own changes and publishes them, and never applies anyone else's.</p>
+              </ed-text-passage>
+              <ed-r-theme-customizer behavior="controller" transport="broadcast" room="demo" deriveEndpoint=""></ed-r-theme-customizer>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">The other end</ed-heading>
+              <ed-cluster gap="inline">
+                <ed-button variant="primary" text="Open the target page" href="target.html?token-sync=demo" target="_blank"></ed-button>
+              </ed-cluster>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+  </body>
+</html>

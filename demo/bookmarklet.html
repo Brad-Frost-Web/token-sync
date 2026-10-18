@@ -29,7 +29,7 @@
                     Drag this link to your bookmarks bar: <a href="{{BOOKMARKLET_URL}}">Token Sync</a>. Without dragging, open the
                     link’s context menu (right-click, or the menu key with the link focused) and choose to bookmark it.
                   </li>
-                  <li>On the page you want to preview, select the bookmark and type a room code.</li>
+                  <li>On the page you want to preview, select the bookmark and type the room with its relay: <code>room@http://127.0.0.1:8787</code>. The source page shows the room when it runs with <code>?relay=</code>.</li>
                   <li>To leave, select it again and type <code>off</code>.</li>
                 </ol>
               </ed-text-passage>
@@ -41,7 +41,8 @@
                 <ul>
                   <li>It only reaches the page you select it on. Following a link loads a new page without it, unless that site carries the drop-in script.</li>
                   <li>A site with a strict Content Security Policy can block it. The browser extension is the way around that.</li>
-                  <li>Rooms are local to this browser until the relay ships: open the source page in another tab of the same browser.</li>
+                  <li>A room code on its own, with no relay, reaches only other tabs on that same site. Sources on other sites, phones and the CLI need the relay.</li>
+                  <li>Chrome asks once per site to let it reach apps on this device (the local relay). Allow it, or the page can't join.</li>
                 </ul>
               </ed-text-passage>
             </ed-section>

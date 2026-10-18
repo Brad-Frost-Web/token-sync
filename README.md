@@ -23,6 +23,8 @@ npm start
 2. Select **Open the target page**. It opens with `?token-sync=demo`.
 3. Change a colour or the corner radius on the source. The target follows within milliseconds, with no network: both tabs talk over `BroadcastChannel`.
 
+[TESTING.md](TESTING.md) walks through every way to try it: Eddie's customizer, a phone on your wifi (`HOST=0.0.0.0 npm start`), your own token files, the bookmarklet and the extension.
+
 The demo pages load Eddie from unpkg, so they need a network connection to render. Syncing itself doesn't.
 
 ## Add it to a page
@@ -41,7 +43,7 @@ The script does nothing on an ordinary page view. Visit the page with `?token-sy
 
 ## The bookmarklet
 
-To preview a site you can't add a script to, run `npm start` and open <http://127.0.0.1:4321/demo/bookmarklet.html>. Drag the link to your bookmarks bar, select it on any page, and type a room code. Type `off` to leave. It only reaches the page you select it on, and a strict Content Security Policy can block it. `npm run build` also writes the URL to `dist/bookmarklet.txt`.
+To preview a site you can't add a script to, run `npm start` and open <http://127.0.0.1:4321/demo/bookmarklet.html>. Drag the link to your bookmarks bar, select it on any page, and type a room code. Type `off` to leave. A bare room code reaches only other tabs on that same site; type `room@relay-url` (`detach@http://127.0.0.1:8787`) to join a room on a relay, which is how a source on another site, a phone or the CLI reaches it. You type the relay yourself, so a link can't choose it. Chrome asks once per site before a public page may reach a relay on your own machine (Local Network Access). It only reaches the page you select it on, and a strict Content Security Policy can block it. `npm run build` also writes the URL to `dist/bookmarklet.txt`.
 
 Both files come from `tools/bundle.js`, a small bundler written for this repo's own module style, so the build adds no dependency (see Deviations). It refuses anything it doesn't translate (default exports, namespace imports, `export let`, multiple declarators, dynamic `import()`, non-relative imports, cycles, and an import of a name its module doesn't export) rather than guessing.
 
@@ -121,7 +123,7 @@ The remote is an Eddie page that joins the room as a controller. Anyone holding 
 - **Deferred:** a QR code and a short URL for the room (#18). For now the presenter shares the link.
 - **One known gap:** Eddie's colour swatches and slider thumb are smaller than the spec's 44 px phone target. They meet WCAG 2.5.8's 24 px. That's filed upstream (#16, Brad-Frost-Web/eddie-design-system#2457) rather than patched over with custom CSS.
 
-Once Eddie's #2447 lands, the remote can host `ed-r-theme-customizer mode="controller"` instead.
+Eddie's theme customizer can drive a room too (eddie-design-system#2447). It isn't in an Eddie release yet: `npm run eddie:develop` builds Eddie's develop branch locally, and <http://127.0.0.1:4321/demo/customizer.html> hosts it as a controller. See [TESTING.md](TESTING.md).
 ## From your token files: the CLI
 
 ```bash

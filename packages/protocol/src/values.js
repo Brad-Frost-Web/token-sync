@@ -27,6 +27,8 @@ export const MAX_VALUE_LENGTH = 400;
 const ALLOWED_FUNCTIONS = new Set([
   'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch',
   'color', 'color-mix', 'light-dark',
+  // Picks black or white for contrast; Eddie's customizer derives text with it.
+  'contrast-color',
   'calc', 'clamp', 'min', 'max',
   'var',
   // Easing: Eddie's contract derives cubic-bezier() for its animation tokens.
@@ -34,7 +36,7 @@ const ALLOWED_FUNCTIONS = new Set([
 ]);
 
 const COLOR_FUNCTIONS = new Set([
-  'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix', 'light-dark',
+  'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix', 'light-dark', 'contrast-color',
 ]);
 
 const MATH_FUNCTIONS = new Set(['calc', 'clamp', 'min', 'max']);

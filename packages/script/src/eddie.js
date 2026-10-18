@@ -43,12 +43,18 @@ export function lazyEddieAdapter({ readComputed }) {
  * ed-toast gets.
  */
 export function createNotifier(document, { setTimeout: later = setTimeout, clearTimeout: cancel = clearTimeout } = {}) {
+  // Kept inside: the extension smoke test runs this function's own source in
+  // an isolated world, where nothing outside it exists.
+  const MAX_TOAST_LINES = 3;
   let toast = null;
   let timer = null;
   let last = { moved: '', problems: '', unchecked: 0 };
 
-  function show(lines, lasting) {
-    for (const line of lines) console.info(`token-sync: ${line}`);
+  function show(all, lasting) {
+    for (const line of all) console.info(`token-sync: ${line}`);
+    // On the page, three and a count, as Eddie's notice does: a toast reading
+    // out every token on a stage display covers the thing being judged.
+    const lines = all.length > MAX_TOAST_LINES ? [...all.slice(0, MAX_TOAST_LINES), `And ${all.length - MAX_TOAST_LINES} more; the console has them all.`] : all;
     if (!document.body) return;
     if (!toast) {
       toast = document.createElement('ed-toast');

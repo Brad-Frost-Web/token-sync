@@ -71,3 +71,18 @@ test('a page that does not define ed-toast gets the console, and no stray elemen
   assert.equal(page.body.children.length, 0);
   assert.match(lines[0], /Nudged a/);
 });
+
+test('a toast names three problems and counts the rest; the console gets them all', (t) => {
+  const info = console.info;
+  const logged = [];
+  console.info = (line) => logged.push(line);
+  t.after(() => {
+    console.info = info;
+  });
+  const page = fakePage();
+  const notify = createNotifier(page.document, { setTimeout: () => {}, clearTimeout: () => {} });
+  const problems = ['p1', 'p2', 'p3', 'p4', 'p5'];
+  notify({ moved: [], problems, unchecked: 0 });
+  assert.deepEqual(page.shown(), [['p1', 'p2', 'p3', 'And 2 more; the console has them all.']]);
+  assert.equal(logged.length, 5);
+});

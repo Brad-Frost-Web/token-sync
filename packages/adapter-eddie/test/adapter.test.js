@@ -154,3 +154,19 @@ test("a contract path key (Eddie's form) is that token's property, contrast-solv
   assert.equal(props[pathToCustomProperty(path)], '#1b4dd8');
   assert.deepEqual(adapter.resolve({ 'contract:color.nope.nope': '#1b4dd8' }).refused.length, 1);
 });
+
+test('a contrast-color() text colour passes through without a "couldn\'t check" note', () => {
+  const adapter = createEddieAdapter({ readComputed: bfwTheme() });
+  const { props, status } = adapter.resolve({ '--ed-theme-color-content-default': 'contrast-color(#9f05c9)' });
+  assert.equal(props['--ed-theme-color-content-default'], 'contrast-color(#9f05c9)');
+  assert.deepEqual(status.problems, []);
+});
+
+test('a text colour set to contrast-color() is never solved, rewritten or reported, even beside a knob', () => {
+  const adapter = createEddieAdapter({ readComputed: bfwTheme() });
+  const name = '--ed-theme-color-content-default';
+  const { props, status } = adapter.resolve({ 'contract:color.background-default': '#111111', [name]: 'contrast-color(#111111)' });
+  assert.equal(props[name], 'contrast-color(#111111)');
+  assert.ok(!status.problems.some((p) => /keep content default /.test(p)), status.problems.join('\n'));
+  assert.ok(!status.moved.some((m) => /^Nudged content default /.test(m)), status.moved.join('\n'));
+});
