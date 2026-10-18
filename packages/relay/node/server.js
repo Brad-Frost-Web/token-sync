@@ -138,5 +138,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(arg('port', process.env.PORT ?? 8787));
   const host = arg('host', '127.0.0.1');
   const { server } = createRelayServer();
-  server.listen(port, host, () => console.log(`Token Sync relay: http://${host}:${port}  (ws://${host}:${port}/rooms/<room>/socket)`));
+  server.listen(port, host, async () => {
+    console.log(`Token Sync relay: http://${host}:${port}  (ws://${host}:${port}/rooms/<room>/socket)`);
+    if (host !== '0.0.0.0') return;
+    // Bound to every interface: say which address a phone on the same wifi should use.
+    const { networkInterfaces } = await import('node:os');
+    const lan = Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal);
+    for (const { address } of lan) console.log(`  on your local network: http://${address}:${port}`);
+  });
 }

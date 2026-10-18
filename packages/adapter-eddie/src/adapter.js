@@ -24,7 +24,7 @@
 
 import { BUTTON_KNOBS, COLOR_KNOBS, customPropertyToPath, expandContract, knownPaths, pathToCustomProperty } from '../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/contract.js';
 import { solve } from '../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/solve.js';
-import { toHex } from '../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/color.js';
+import { contrast, toHex } from '../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/color.js';
 import { buttonScale } from '../../../node_modules/@brad-frost-web/eddie-design-tokens/contract/pairs.js';
 
 const PREFIX = 'contract:';
@@ -32,6 +32,20 @@ const COLOR_KEYS = new Set(COLOR_KNOBS.map((k) => k.key));
 const PATHS = new Set(knownPaths());
 /** A contract path that holds a colour: color.background.brand, link.color.content.hover. */
 const isColourPath = (path) => /(^|\.)color(\.|$)/.test(path);
+/**
+ * What `contrast-color(<hex>)` paints: black or white, whichever contrasts
+ * more with its argument. Null when the argument isn't a hex colour. It
+ * contrasts with its argument only — not with the surfaces the token sits
+ * on — so the adapter still checks the colour it really produces.
+ */
+export function contrastColorOf(value) {
+  const match = /^contrast-color\(\s*([^()]+?)\s*\)$/i.exec(String(value).trim());
+  const arg = match && toHex(match[1]);
+  if (!arg) return null;
+
+  return contrast(arg, '#ffffff') >= contrast(arg, '#000000') ? '#ffffff' : '#000000';
+}
+
 /** A token named as a colour, the same test Eddie's applier uses. */
 const isColourName = (name) => /-color-|-color$/.test(name);
 
@@ -129,6 +143,8 @@ export function createEddieAdapter({ readComputed }) {
     const problems = [];
     let knobs = 0;
     let unchecked = 0;
+    /** Contract colours set to contrast-color(): they pick their own contrast, so the solver leaves them be. */
+    const selfContrasting = new Set();
 
     for (const [key, value] of Object.entries(props)) {
       const name = (key.startsWith(PREFIX) && contractPathProperty(key)) || key;
@@ -153,8 +169,14 @@ export function createEddieAdapter({ readComputed }) {
       const path = customPropertyToPath(name);
       const colourPath = path && isColourPath(path) ? path : null;
       const hex = colourPath && toHex(value);
+      const produced = colourPath && !hex ? contrastColorOf(value) : null;
       if (colourPath && hex) onContract[colourPath] = hex;
-      else {
+      else if (produced) {
+        // Written as sent; checked as the black or white it paints.
+        passthrough[name] = value;
+        onContract[colourPath] = produced;
+        selfContrasting.add(colourPath);
+      } else {
         passthrough[name] = value;
         if (colourPath) problems.push(`Couldn't contrast-check ${name}: only hex colours can be checked, so ${value} was applied as sent.`);
         else if (!path && isColourName(name)) unchecked += 1;
@@ -175,11 +197,16 @@ export function createEddieAdapter({ readComputed }) {
 
     const out = { ...passthrough };
     for (const [path, value] of Object.entries(solved)) {
+      if (selfContrasting.has(path)) continue;
       if (baseline[path] !== value || path in onContract) out[pathToCustomProperty(path)] = value;
     }
 
-    const moved = report.moved.filter((m) => baseline[m.path] !== solved[m.path]).map(describeMove);
-    for (const u of report.unresolved) problems.push(`Couldn't keep ${readable(u.path)} readable on every background it sits on.`);
+    // A contrast-color() token is never rewritten. If the solver had to move it
+    // (or couldn't), what it really paints isn't readable everywhere: say so.
+    const unreadable = new Set([...report.moved, ...report.unresolved].map((entry) => entry.path).filter((path) => selfContrasting.has(path)));
+    const moved = report.moved.filter((m) => !selfContrasting.has(m.path) && baseline[m.path] !== solved[m.path]).map(describeMove);
+    for (const u of report.unresolved.filter((entry) => !selfContrasting.has(entry.path))) problems.push(`Couldn't keep ${readable(u.path)} readable on every background it sits on.`);
+    for (const path of unreadable) problems.push(`${readable(path)} uses contrast-color(), which isn't readable on every background it sits on.`);
     for (const skip of report.skipped ?? []) problems.push(`Couldn't contrast-check ${skip.label ?? readable(skip.fgPath ?? skip.path ?? '')}: one of its colours isn't a hex value.`);
 
     return { props: out, refused, status: { moved, problems, unchecked } };

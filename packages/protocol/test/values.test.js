@@ -98,3 +98,8 @@ test('an apostrophe inside double quotes is just a character', () => {
   assert.equal(checkSafety('"it\'s", serif').ok, true);
   assert.equal(checkSafety('"it\'s').ok, false);
 });
+
+test("accepts contrast-color(), which Eddie's customizer derives text colours with", () => {
+  assert.equal(checkSafety('contrast-color(#9f05c9)').ok, true);
+  assert.equal(checkValue('contrast-color(var(--ed-theme-color-background-brand))', 'color').ok, true);
+});

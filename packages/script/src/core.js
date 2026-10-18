@@ -88,13 +88,16 @@ export function resolveRoom({ search, storage }) {
  * one room at a time: starting again leaves the previous room first.
  * The page talks to a relay when it declares one with
  * `<meta name="token-sync-relay" content="…">`, and over BroadcastChannel
- * (this browser only) when it doesn't.
- * @param {{ room?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object, createAdapter?: Function, onResolved?: Function }} [context]
+ * (this browser only) when it doesn't. A caller acting on the person's own
+ * input (the bookmarklet's prompt) may name the relay instead, as `relay`;
+ * it never comes from the URL, so a crafted link can't choose it.
+ * @param {{ room?: string, relay?: string, location?: Location, storage?: Storage, document?: Document, transport?: 'broadcast' | 'local' | object, createAdapter?: Function, onResolved?: Function }} [context]
  *   `createAdapter({ readComputed, document })` returns a design system's
  *   adapter for this page (or null); `onResolved(status)` hears its status.
  */
 export function start({
   room: requested,
+  relay: named,
   location = globalThis.location,
   storage = safeSessionStorage(),
   document = globalThis.document,
@@ -157,7 +160,7 @@ export function start({
     },
     onRefuse: ({ name, value, reason }) => console.warn(`token-sync: refused ${name}: ${value} — ${reason}`),
   });
-  const declared = document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content;
+  const declared = named ?? document.querySelector?.(`meta[name="${RELAY_META}"]`)?.content;
   const relay = relaySocketUrl(declared, room);
   if (declared && !relay) console.warn(`token-sync: ignoring <meta name="${RELAY_META}" content="${declared}">: it must be an absolute http(s) or ws(s) URL. Using this browser only.`);
   const channel =

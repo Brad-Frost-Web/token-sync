@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "start": "node demo/server.js",
+    "eddie:develop": "node tools/eddie-develop.js",
     "relay": "node packages/relay/node/server.js",
     "token-sync": "node packages/cli/bin/token-sync.js",
     "build": "node tools/build.js",

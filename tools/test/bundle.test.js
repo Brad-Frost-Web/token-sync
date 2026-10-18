@@ -229,3 +229,26 @@ test('export { a, b as c } exports names already in scope', (t) => {
   assert.equal(out.A, 1);
   assert.equal(out.Bee, 2);
 });
+
+test('room@relay joins the room on that relay, and the next run offers it again', (t) => {
+  const { sandbox, documentElement, storage } = fakePage('detach@http://127.0.0.1:8787');
+  const opened = [];
+  sandbox.URL = URL;
+  sandbox.WebSocket = class {
+    constructor(url) {
+      opened.push(url);
+    }
+    addEventListener() {}
+    send() {}
+    close() {}
+  };
+  vm.runInNewContext(bookmarkletSource(), sandbox);
+  t.after(() => sandbox.tokenSync?.close());
+  assert.equal(documentElement.dataset.tokenSync, 'detach');
+  assert.deepEqual(opened, ['ws://127.0.0.1:8787/rooms/detach/socket']);
+  assert.equal(storage.get('token-sync:room:relay'), 'http://127.0.0.1:8787');
+  let offered;
+  sandbox.prompt = (_, value) => ((offered = value), null);
+  vm.runInNewContext(bookmarkletSource(), sandbox);
+  assert.equal(offered, 'detach@http://127.0.0.1:8787');
+});

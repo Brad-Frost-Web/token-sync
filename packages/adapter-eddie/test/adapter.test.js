@@ -154,3 +154,22 @@ test("a contract path key (Eddie's form) is that token's property, contrast-solv
   assert.equal(props[pathToCustomProperty(path)], '#1b4dd8');
   assert.deepEqual(adapter.resolve({ 'contract:color.nope.nope': '#1b4dd8' }).refused.length, 1);
 });
+
+test('a contrast-color() text colour is written as sent and checked as the black or white it paints', () => {
+  const readComputed = bfwTheme();
+  const adapter = createEddieAdapter({ readComputed });
+  const name = '--ed-theme-color-content-default';
+  const page = readComputed('--ed-theme-color-background-default').trim();
+  const flagged = (status) => status.problems.some((p) => /^content default uses contrast-color/.test(p));
+  // Contrasting with the page it sits on: black on bfw's light page. Readable.
+  const fine = adapter.resolve({ [name]: `contrast-color(${page})` });
+  assert.equal(fine.props[name], `contrast-color(${page})`);
+  assert.equal(flagged(fine.status), false, fine.status.problems.join('\n'));
+  // Contrasting with black: white text on a light page. Reported, never rewritten.
+  const bad = adapter.resolve({ [name]: 'contrast-color(#000000)' });
+  assert.equal(bad.props[name], 'contrast-color(#000000)');
+  assert.equal(flagged(bad.status), true, bad.status.problems.join('\n'));
+  // An argument that isn't hex can't be checked, and says so.
+  const unknown = adapter.resolve({ [name]: 'contrast-color(var(--ed-theme-color-background-default))' });
+  assert.ok(unknown.status.problems.some((p) => /Couldn't contrast-check/.test(p)));
+});
