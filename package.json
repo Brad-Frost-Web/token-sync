@@ -23,7 +23,7 @@
     "extension:smoke": "node packages/extension/smoke.js"
   },
   "devDependencies": {
-    "@brad-frost-web/bfw-process": "0.25.0"
+    "@brad-frost-web/bfw-process": "0.26.0"
   },
   "engines": {
     "node": ">=22"
