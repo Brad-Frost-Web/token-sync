@@ -18,7 +18,7 @@
           <ed-stack gap="section">
             <ed-page-header>
               <ed-heading slot="heading" enhance><h1>Token Sync</h1></ed-heading>
-              Preview a room's tokens on this tab. Only this tab, and only on sites you allow.
+              Preview a room's tokens on as many tabs as you like. Every tab in the room updates at the same time, on sites you allow.
             </ed-page-header>
 
             <ed-section align="left">
@@ -30,15 +30,24 @@
                 <ed-text-field id="relay" label="Relay" name="relay" type="url" value="http://127.0.0.1:8787" fieldNote="Where the room lives. npm run relay starts one on this machine."></ed-text-field>
                 <ed-cluster gap="inline">
                   <ed-button id="sync" type="submit" variant="primary" text="Preview this tab in the room"></ed-button>
-                  <ed-button id="stop" text="Stop previewing" disabled></ed-button>
+                  <ed-button id="stop" text="Stop this tab" disabled></ed-button>
+                  <ed-button id="stop-all" text="Stop every tab" disabled></ed-button>
                 </ed-cluster>
               </ed-stack>
               </form>
             </ed-section>
 
             <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Change the tokens</ed-heading>
+              <ed-text-passage slot="header"><p>Open Eddie's theme customizer, with every token, as a source for this room.</p></ed-text-passage>
+              <ed-cluster gap="inline">
+                <ed-button id="controls" text="Open token controls" disabled></ed-button>
+              </ed-cluster>
+            </ed-section>
+
+            <ed-section align="left">
               <ed-heading slot="header" tagName="h2">Allowed sites</ed-heading>
-              <ed-text-passage slot="header"><p>The room is brought back on these sites as the synced tab moves around them.</p></ed-text-passage>
+              <ed-text-passage slot="header"><p>The room is brought back on these sites as synced tabs move around them.</p></ed-text-passage>
               <ed-stack id="sites" gap="flow"></ed-stack>
             </ed-section>
           </ed-stack>
