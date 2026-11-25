@@ -226,13 +226,14 @@ export function createHub({ chrome, createTransport = createRemoteTransport, con
   }
 
   /**
-   * Requests from the popup. Only the extension's own popup page may make
-   * them, not a content script running in some page (opened as a tab, the
-   * popup also has a tab, so the page URL is what tells them apart).
+   * Requests from the popup and the controls window. Only the extension's
+   * own pages may make them, not a content script running in some page (an
+   * extension page opened in a tab or window also has a tab, so the page URL
+   * is what tells them apart).
    */
   async function onMessage(request, sender = {}) {
-    const popup = chrome.runtime?.getURL?.('popup.html');
-    if (sender.tab && !(popup && sender.url?.startsWith(popup))) throw new Error('requests come from the popup');
+    const own = ['popup.html', 'controls.html'].map((page) => chrome.runtime?.getURL?.(page)).filter(Boolean);
+    if (sender.tab && !own.some((page) => sender.url?.startsWith(page))) throw new Error('requests come from the popup');
     switch (request?.type) {
       case 'status':
         return { session, status, lists: await lists() };

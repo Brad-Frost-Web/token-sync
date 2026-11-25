@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- eddie-template: ed-p-form — a compact tool page in an extension window, without the site shell -->
+<html lang="en" class="bfw">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Token Sync controls</title>
+    <link rel="stylesheet" href="eddie/tokens/bfw/build/css/tokens.css" />
+    <link rel="stylesheet" href="eddie/tokens/bfw/build/css/bfw.css" />
+    <link rel="stylesheet" href="eddie/tokens/bfw/css/fonts.css" />
+    <link rel="stylesheet" href="eddie/tokens/core/css/base.css" />
+    <script type="module" src="eddie/components/cdn/eddie.js"></script>
+    <script type="module" src="eddie/recipes/cdn/recipes/tools/theme-customizer/theme-customizer.js"></script>
+    <script src="controls.js" defer></script>
+  </head>
+  <body>
+    <ed-page>
+      <ed-main id="main">
+        <ed-layout-container variant="narrow">
+          <ed-stack gap="section">
+            <ed-page-header>
+              <ed-heading slot="heading" enhance><h1>Token controls</h1></ed-heading>
+              <ed-text-passage><p>Every token Eddie's theme customizer knows, sent to the room. Each tab previewing the room repaints together.</p></ed-text-passage>
+            </ed-page-header>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">The room</ed-heading>
+              <ed-text-passage slot="header"><p id="status" role="status">Joining the room…</p></ed-text-passage>
+              <ed-stack gap="field">
+                <ed-toggle id="every-theme" label="Send to every site, whatever its theme" checked fieldNote="Off sends only to pages wearing the theme picked below.">
+                  <span slot="off">Send to every site, whatever its theme</span>
+                </ed-toggle>
+              </ed-stack>
+            </ed-section>
+
+            <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Tokens</ed-heading>
+              <ed-text-passage slot="header"><p>Choose Theme to open the full set: colors, buttons, fonts, borders, radius, shadows, Random and Reset.</p></ed-text-passage>
+              <ed-r-theme-customizer id="customizer" behavior="controller" derive-endpoint=""></ed-r-theme-customizer>
+            </ed-section>
+          </ed-stack>
+        </ed-layout-container>
+      </ed-main>
+    </ed-page>
+  </body>
+</html>

@@ -38,6 +38,14 @@
             </ed-section>
 
             <ed-section align="left">
+              <ed-heading slot="header" tagName="h2">Change the tokens</ed-heading>
+              <ed-text-passage slot="header"><p>Open Eddie's theme customizer, with every token, as a source for this room.</p></ed-text-passage>
+              <ed-cluster gap="inline">
+                <ed-button id="controls" text="Open token controls" disabled></ed-button>
+              </ed-cluster>
+            </ed-section>
+
+            <ed-section align="left">
               <ed-heading slot="header" tagName="h2">Allowed sites</ed-heading>
               <ed-text-passage slot="header"><p>The room is brought back on these sites as synced tabs move around them.</p></ed-text-passage>
               <ed-stack id="sites" gap="flow"></ed-stack>

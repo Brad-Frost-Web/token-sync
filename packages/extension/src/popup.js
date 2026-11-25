@@ -1,5 +1,6 @@
 // The popup: choose a room and relay, add this tab to it, manage allowed sites.
 
+import { isRoom } from '../../protocol/src/index.js';
 import { permissionFor, siteOf } from './allowlist.js';
 
 const $ = (id) => document.getElementById(id);
@@ -65,6 +66,7 @@ async function render() {
     $('sync').setAttribute('text', session && !switching ? 'Add this tab to the room' : 'Preview this tab in the room');
     $('stop').disabled = !here;
     $('stop-all').disabled = !session;
+    $('controls').disabled = !(session?.room || isRoom(typed));
     $('stop-all').setAttribute('text', tabIds.length > 1 ? `Stop all ${tabIds.length} tabs` : 'Stop every tab');
     if (!site) say("This page can't be previewed. Token Sync works on http and https pages.");
     else if (switching) say(`Switching to room “${typed}” stops the ${tabsLabel(tabIds.length)} in room “${session.room}”.`);
@@ -97,6 +99,16 @@ function startPreview(event) {
   );
 }
 
+/** The controls window, for the room being previewed (or the one typed in). */
+async function openControls() {
+  const { session } = await ask({ type: 'status' }).catch(() => ({}));
+  const typed = String($('room').value).trim();
+  const room = typed || session?.room;
+  const relay = typed && typed !== session?.room ? String($('relay').value).trim() : (session?.relay ?? String($('relay').value).trim());
+  const url = chrome.runtime.getURL(`controls.html?${new URLSearchParams({ room, relay })}`);
+  await chrome.windows.create({ url, type: 'popup', width: 480, height: 900 }).catch(() => chrome.tabs.create({ url }));
+}
+
 async function start() {
   [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const saved = (await chrome.storage.local.get(LAST_KEY))[LAST_KEY];
@@ -106,6 +118,7 @@ async function start() {
 
   $('form').addEventListener('submit', startPreview);
   $('stop').addEventListener('click', () => ask({ type: 'stop', tabId: tab.id }).then(render, (error) => say(`Couldn't stop: ${error.message}`)));
+  $('controls').addEventListener('click', openControls);
   $('stop-all').addEventListener('click', () => ask({ type: 'stop' }).then(render, (error) => say(`Couldn't stop: ${error.message}`)));
   $('room').addEventListener('input', render);
   await render();

@@ -7,6 +7,7 @@
   "license": "MIT",
   "devDependencies": {
     "@brad-frost-web/eddie-design-tokens": "0.70.0",
+    "@brad-frost-web/eddie-recipes": "0.80.0",
     "@brad-frost-web/eddie-web-components": "0.70.0"
   }
 }

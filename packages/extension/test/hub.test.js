@@ -312,6 +312,8 @@ test('content scripts cannot make popup requests', async () => {
   await assert.rejects(hub.onMessage({ type: 'stop' }, { tab: { id: 7 }, url: 'https://bradfrost.com/' }), /come from the popup/);
   // The popup page opened in a tab is still the popup.
   assert.deepEqual(await hub.onMessage({ type: 'stop' }, { tab: { id: 9 }, url: 'chrome-extension://abc/popup.html' }), { ok: true });
+  // So is the controls window.
+  assert.ok((await hub.onMessage({ type: 'status' }, { tab: { id: 10 }, url: 'chrome-extension://abc/controls.html?room=detach' })).lists);
 });
 
 test('a restarted background brings the room back to every synced tab', async () => {

@@ -2,8 +2,8 @@
 // (chrome://extensions → Load unpacked; about:debugging → Load Temporary Add-on).
 //
 // MV3 forbids remote code, so Eddie is copied in from the pinned packages
-// rather than loaded from a CDN: the components' self-contained CDN build,
-// and the bfw theme's tokens, base styles and fonts.
+// rather than loaded from a CDN: the components' and recipes' self-contained
+// CDN builds, and the bfw theme's tokens, base styles and fonts.
 
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,11 +21,15 @@ export function buildExtension(out = join(REPO_ROOT, 'dist/extension')) {
   script('background.js', 'background.js');
   script('content-entry.js', 'content.js');
   script('popup.js', 'popup.js');
+  script('controls-entry.js', 'controls.js');
   cpSync(join(HERE, 'manifest.json'), join(out, 'manifest.json'));
   cpSync(join(HERE, 'popup.html'), join(out, 'popup.html'));
+  cpSync(join(HERE, 'controls.html'), join(out, 'controls.html'));
 
   const components = packageRoot('@brad-frost-web/eddie-web-components');
   cpSync(join(components, 'cdn'), join(out, 'eddie/components/cdn'), { recursive: true });
+  // The controls window's customizer: the recipes' self-contained CDN build.
+  cpSync(join(packageRoot('@brad-frost-web/eddie-recipes'), 'cdn'), join(out, 'eddie/recipes/cdn'), { recursive: true });
   const tokens = packageRoot('@brad-frost-web/eddie-design-tokens');
   for (const path of ['bfw/build/css', 'bfw/css', 'core/css', 'core/fonts']) {
     cpSync(join(tokens, path), join(out, 'eddie/tokens', path), { recursive: true });
