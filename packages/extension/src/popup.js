@@ -1,4 +1,4 @@
-// The popup: choose a room and relay, preview this tab, manage allowed sites.
+// The popup: choose a room and relay, add this tab to it, manage allowed sites.
 
 import { permissionFor, siteOf } from './allowlist.js';
 
@@ -46,19 +46,33 @@ function renderSites(room, listed) {
   }
 }
 
+/** “1 tab”, “3 other tabs”. */
+function tabsLabel(count, adjective = '') {
+  return `${count} ${adjective ? `${adjective} ` : ''}tab${count === 1 ? '' : 's'}`;
+}
+
 async function render() {
   try {
     const { session, status, lists } = await ask({ type: 'status' });
-    const here = session && tab && session.tabId === tab.id;
+    const tabIds = session?.tabIds ?? [];
+    const here = Boolean(tab && tabIds.includes(tab.id));
+    const others = tabIds.length - (here ? 1 : 0);
     const site = siteOf(tab?.url ?? '');
-    $('sync').disabled = !site;
-    $('stop').disabled = !session;
+    const typed = String($('room').value).trim();
+    const switching = Boolean(session && typed && typed !== session.room);
+    const connection = `${status.state}${status.error ? `: ${status.error}` : ''}`;
+    $('sync').disabled = !site || (here && !switching);
+    $('sync').setAttribute('text', session && !switching ? 'Add this tab to the room' : 'Preview this tab in the room');
+    $('stop').disabled = !here;
+    $('stop-all').disabled = !session;
+    $('stop-all').setAttribute('text', tabIds.length > 1 ? `Stop all ${tabIds.length} tabs` : 'Stop every tab');
     if (!site) say("This page can't be previewed. Token Sync works on http and https pages.");
-    else if (here) say(`Previewing room “${session.room}” on this tab (${status.state}${status.error ? `: ${status.error}` : ''}). Hold \\ on the page to compare.`);
-    else if (session) say(`Another tab is previewing room “${session.room}”. Previewing this one stops that.`);
+    else if (switching) say(`Switching to room “${typed}” stops the ${tabsLabel(tabIds.length)} in room “${session.room}”.`);
+    else if (here) say(`Previewing room “${session.room}” on this tab${others ? ` and ${tabsLabel(others, 'other')}, all updating together` : ''} (${connection}). Hold \\ on a page to compare.`);
+    else if (session) say(`Room “${session.room}” is live on ${tabsLabel(tabIds.length)} (${connection}). Add this one and it updates with them.`);
     else if (status.error) say(status.error);
     else say(`Not previewing. ${site} will be added to the room's allowed sites.`);
-    const room = String($('room').value).trim() || session?.room;
+    const room = typed || session?.room;
     renderSites(room, (room && lists[room]) || []);
   } catch (error) {
     say(`The extension's background isn't answering (${error.message}). Close and reopen this popup.`);
@@ -91,7 +105,8 @@ async function start() {
   $('relay').value = session?.relay ?? saved?.relay ?? $('relay').value;
 
   $('form').addEventListener('submit', startPreview);
-  $('stop').addEventListener('click', () => ask({ type: 'stop' }).then(render, (error) => say(`Couldn't stop: ${error.message}`)));
+  $('stop').addEventListener('click', () => ask({ type: 'stop', tabId: tab.id }).then(render, (error) => say(`Couldn't stop: ${error.message}`)));
+  $('stop-all').addEventListener('click', () => ask({ type: 'stop' }).then(render, (error) => say(`Couldn't stop: ${error.message}`)));
   $('room').addEventListener('input', render);
   await render();
   setInterval(render, 1500); // connection state changes while the popup is open

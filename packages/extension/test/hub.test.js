@@ -87,17 +87,109 @@ test('nothing changes without the site permission, on a page that is not http(s)
   assert.equal(hub.session, null);
 });
 
-test('one tab at a time: syncing another tab stops the first and tells its page to leave', async () => {
+test('every synced tab gets every change at once, over one relay connection', async () => {
+  const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
+  const relay = fakeTransport();
+  const hub = createHub({ chrome, createTransport: relay.create });
+  await hub.sync({ tabId: 1, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  assert.equal(relay.made.length, 1); // the second and third tab join the same connection
+  assert.deepEqual(hub.session.tabIds, [1, 2, 7]);
+  assert.deepEqual(chrome.injected, [1, 2, 7]);
+  const pages = [fakePort(1), fakePort(2), fakePort(7)];
+  for (const page of pages) await hub.onPortConnect(page);
+  relay.made[0].push(set({ '--ed-theme-border-radius-md': '1rem' }, 20));
+  for (const page of pages) {
+    assert.equal(page.sent.some((m) => m === 'disconnected' || m.kind === 'stop'), false);
+    assert.equal(page.sent.at(-1).msg.props['--ed-theme-border-radius-md'], '1rem');
+  }
+  assert.deepEqual(chrome.local['token-sync:allowlists'], { detach: ['https://atomicdesign.bradfrost.com', 'https://bradfrost.com'] });
+});
+
+test('a page that connects while its applier is still being injected is let in', async () => {
+  const chrome = fakeChrome();
+  const relay = fakeTransport();
+  const hub = createHub({ chrome, createTransport: relay.create });
+  const port = fakePort(7);
+  // In a real browser the content script connects before executeScript resolves.
+  chrome.scripting.executeScript = async ({ target }) => {
+    chrome.injected.push(target.tabId);
+    await hub.onPortConnect(port);
+  };
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  assert.deepEqual(port.sent[0], { kind: 'config', room: 'detach' });
+});
+
+test('syncing a tab twice keeps it once', async () => {
+  const relay = fakeTransport();
+  const hub = createHub({ chrome: fakeChrome(), createTransport: relay.create });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  assert.deepEqual(hub.session.tabIds, [7]);
+  assert.equal(relay.made.length, 1);
+});
+
+test('stopping one tab leaves the others in the room; the last one out leaves it', async () => {
+  const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
+  const relay = fakeTransport();
+  const hub = createHub({ chrome, createTransport: relay.create });
+  await hub.sync({ tabId: 1, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  const one = fakePort(1);
+  const two = fakePort(2);
+  await hub.onPortConnect(one);
+  await hub.onPortConnect(two);
+  await hub.onMessage({ type: 'stop', tabId: 1 });
+  assert.ok(one.sent.some((m) => m.kind === 'stop'));
+  assert.equal(two.sent.some((m) => m.kind === 'stop'), false);
+  assert.deepEqual(hub.session.tabIds, [2]);
+  assert.equal(relay.made[0].closed, false);
+  relay.made[0].push(set({ '--a': '1px' }, 21));
+  assert.equal(one.sent.filter((m) => m.kind === 'msg').length, 0);
+  assert.equal(two.sent.at(-1).msg.props['--a'], '1px');
+  await hub.onTabRemoved(2);
+  assert.equal(hub.session, null);
+  assert.equal(relay.made[0].closed, true);
+});
+
+test('stop with no tab stops every tab', async () => {
+  const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
+  const hub = createHub({ chrome, createTransport: fakeTransport().create });
+  await hub.sync({ tabId: 1, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  const one = fakePort(1);
+  const two = fakePort(2);
+  await hub.onPortConnect(one);
+  await hub.onPortConnect(two);
+  await hub.onMessage({ type: 'stop' });
+  assert.ok(one.sent.some((m) => m.kind === 'stop'));
+  assert.ok(two.sent.some((m) => m.kind === 'stop'));
+  assert.equal(hub.session, null);
+});
+
+test('choosing a different room moves the preview: the old room\'s tabs stop', async () => {
   const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
   const relay = fakeTransport();
   const hub = createHub({ chrome, createTransport: relay.create });
   await hub.sync({ tabId: 1, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
   const first = fakePort(1);
   await hub.onPortConnect(first);
-  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'studio', relay: 'https://r.example' });
   assert.ok(first.sent.some((m) => m.kind === 'stop'));
   assert.equal(relay.made[0].closed, true);
-  assert.equal(hub.session.tabId, 2);
+  assert.equal(hub.session.room, 'studio');
+  assert.deepEqual(hub.session.tabIds, [2]);
+});
+
+test('a tab the browser refuses is left out, and the tabs already in the room carry on', async () => {
+  const chrome = fakeChrome();
+  const relay = fakeTransport();
+  const hub = createHub({ chrome, createTransport: relay.create });
+  await hub.sync({ tabId: 7, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await assert.rejects(hub.sync({ tabId: 666, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' }), /won't let extensions run/);
+  assert.deepEqual(hub.session.tabIds, [7]);
+  assert.equal(relay.made[0].closed, false);
 });
 
 test('a page in the synced tab gets the room on arrival, then every change', async () => {
@@ -206,6 +298,15 @@ test('forgetting the site being previewed stops the preview', async () => {
   assert.equal(hub.session, null);
 });
 
+test('forgetting a site stops only the tabs on that site', async () => {
+  const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
+  const hub = createHub({ chrome, createTransport: fakeTransport().create });
+  await hub.sync({ tabId: 1, url: 'https://bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
+  await hub.onMessage({ type: 'forget-site', room: 'detach', site: 'https://bradfrost.com' });
+  assert.deepEqual(hub.session.tabIds, [2]);
+});
+
 test('content scripts cannot make popup requests', async () => {
   const hub = createHub({ chrome: fakeChrome(), createTransport: fakeTransport().create });
   await assert.rejects(hub.onMessage({ type: 'stop' }, { tab: { id: 7 }, url: 'https://bradfrost.com/' }), /come from the popup/);
@@ -213,12 +314,25 @@ test('content scripts cannot make popup requests', async () => {
   assert.deepEqual(await hub.onMessage({ type: 'stop' }, { tab: { id: 9 }, url: 'chrome-extension://abc/popup.html' }), { ok: true });
 });
 
-test('a restarted background brings the room back to the synced tab', async () => {
-  const chrome = fakeChrome();
+test('a restarted background brings the room back to every synced tab', async () => {
+  const chrome = fakeChrome({ granted: ['https://bradfrost.com/*', 'https://atomicdesign.bradfrost.com/*'] });
   const first = createHub({ chrome, createTransport: fakeTransport().create });
   await first.sync({ tabId: 7, url: 'https://bradfrost.com/blog', room: 'detach', relay: 'https://r.example' });
+  await first.sync({ tabId: 2, url: 'https://atomicdesign.bradfrost.com/', room: 'detach', relay: 'https://r.example' });
   chrome.injected.length = 0;
-  const revived = createHub({ chrome, createTransport: fakeTransport().create });
+  const relay = fakeTransport();
+  const revived = createHub({ chrome, createTransport: relay.create });
   await revived.restore();
+  assert.deepEqual(chrome.injected, [7, 2]);
+  assert.equal(relay.made.length, 1);
+});
+
+test('a session saved by the one-tab version is picked up as a room of one', async () => {
+  const chrome = fakeChrome();
+  await chrome.storage.session.set({ 'token-sync:session': { tabId: 7, room: 'detach', relay: 'https://r.example' } });
+  await chrome.storage.local.set({ 'token-sync:allowlists': { detach: ['https://bradfrost.com'] } });
+  const hub = createHub({ chrome, createTransport: fakeTransport().create });
+  await hub.restore();
+  assert.deepEqual(hub.session, { room: 'detach', relay: 'https://r.example', tabIds: [7] });
   assert.deepEqual(chrome.injected, [7]);
 });

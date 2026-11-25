@@ -55,12 +55,12 @@ For sites you can't add a script to and where a bookmarklet is blocked, there's 
 npm run build:extension   # writes dist/extension/
 ```
 
-Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **Load unpacked**. Open the popup on the tab you want, enter a room code and relay, and choose **Preview this tab in the room**.
+Load `dist/extension/` unpacked: `chrome://extensions` → Developer mode → **Load unpacked**. Open the popup on a tab, enter a room code and relay, and choose **Preview this tab in the room**. Then open the popup on each other tab you want in the room and choose **Add this tab to the room**.
 
 **Tested in Chrome. Built for Firefox, but not yet tried there.** The manifest carries what Firefox 128+ needs (`background.scripts`, a gecko id), and the popup asks for permission the way Firefox requires. To try it: `about:debugging` → This Firefox → **Load Temporary Add-on** → `dist/extension/manifest.json`.
 
 - **Rooms live on a relay.** The extension joins rooms on a relay, so the room can hold phones and other machines. A room that lives inside the extension and spans tabs on different sites with no network (FEATURE-SPEC Flow B) is #20.
-- **One tab at a time.** Previewing another tab stops the first, and its page goes back to how it was.
+- **As many tabs as you like, all at once.** Every tab you add joins the same room over the background's one relay connection, and each change reaches all of them in the same turn, so three, five or seven sites side by side repaint together. **Stop this tab** takes one out and its page goes back to how it was; **Stop every tab** ends the preview. Choosing a different room moves the preview there, and the tabs in the old room stop.
 - **Only sites you allow.** The first preview on a site asks the browser for permission for that one site (no blanket "all sites" grant). The site joins the room's allowed list, and as the tab moves between allowed sites the room comes back on every page. The popup lists the allowed sites, and removing one also gives back its permission.
 - **The background holds the relay connection**, so a page's Content Security Policy can't block it. The synced page sends a heartbeat that keeps the background awake. If the browser stops the background anyway, the page reconnects, and the restarted background replays the room. The page runs only the applier, with the same guardrails as the drop-in, including hold <kbd>\</kbd> to compare.
 - **On Eddie pages it brings Eddie's contract**, as the Eddie drop-in does: `contract:` knobs expand and stay legible, and what was nudged shows in the page's own `ed-toast` when the page defines one (the content script runs in an isolated world and can't register components; otherwise it goes to the console). The content script carries the adapter, about 118 KB, on every allowed site.
